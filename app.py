@@ -266,10 +266,20 @@ def code_query():
         data = request.get_json()
         query = data.get('query', '')
         file_filters = data.get('file_filters', [])
+        
+        app.logger.info(f"[Code Q&A API] Received query: {query[:100]}")
+        app.logger.info(f"[Code Q&A API] File filters: {file_filters}")
+        
         result = query_codebase(query, file_filters=file_filters)
+        
+        app.logger.info(f"[Code Q&A API] Response status: {result.get('status')}")
+        app.logger.info(f"[Code Q&A API] Response length: {len(result.get('response', ''))}")
+        
         return jsonify(result)
     except Exception as e:
-        app.logger.error(f"Error in Code query: {e}")
+        app.logger.error(f"[Code Q&A API] Error in Code query: {e}")
+        import traceback
+        app.logger.error(f"[Code Q&A API] Traceback: {traceback.format_exc()}")
         return jsonify({'error': str(e), 'status': 'error'}), 500
 
 @app.route('/api/code/files', methods=['GET'])
@@ -287,6 +297,50 @@ def code_files():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e), 'files': []}), 500
+
+@app.route('/api/debug/code-supabase', methods=['GET'])
+def debug_code_supabase():
+    """Debug endpoint to check Code Q&A Supabase connection and data"""
+    diagnostics = {
+        'code_supabase_available': False,
+        'code_files_count': 0,
+        'code_chunks_count': 0,
+        'sample_files': [],
+        'errors': []
+    }
+    
+    try:
+        from backend.storage.code_supabase_storage import USE_SUPABASE, list_code_files_supabase
+        from backend.storage.supabase_client import get_code_files
+        
+        diagnostics['code_supabase_available'] = USE_SUPABASE
+        
+        if USE_SUPABASE:
+            try:
+                files = get_code_files()
+                diagnostics['code_files_count'] = len(files) if files else 0
+                diagnostics['sample_files'] = [f.get('file_path', 'unknown') for f in (files[:5] if files else [])]
+                
+                # Try to get chunk count
+                try:
+                    from backend.storage.supabase_client import get_supabase_client
+                    client = get_supabase_client()
+                    result = client.table('code_chunks').select('id', count='exact').limit(1).execute()
+                    diagnostics['code_chunks_count'] = result.count if hasattr(result, 'count') else 'unknown'
+                except Exception as e:
+                    diagnostics['errors'].append(f"Could not count chunks: {e}")
+                    
+            except Exception as e:
+                diagnostics['errors'].append(f"Error fetching code files: {e}")
+        else:
+            diagnostics['errors'].append("Code Supabase not configured")
+            
+    except Exception as e:
+        diagnostics['errors'].append(f"Diagnostic error: {e}")
+        import traceback
+        diagnostics['traceback'] = traceback.format_exc()
+    
+    return jsonify(diagnostics)
 
 @app.route('/api/debug/supabase', methods=['GET'])
 def debug_supabase():

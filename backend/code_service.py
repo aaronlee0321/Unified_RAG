@@ -284,6 +284,11 @@ def generate_context_supabase(
     query_embedding = embedding_func([query])[0]
     
     # Get initial chunks
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[Code Q&A] Starting search for query: {query[:100]}")
+    logger.info(f"[Code Q&A] File filters: {file_filters}")
+    
     initial_methods = search_code_chunks_supabase(
         query=query,
         query_embedding=query_embedding,
@@ -292,6 +297,7 @@ def generate_context_supabase(
         file_paths=file_filters,
         chunk_type='method'
     )
+    logger.info(f"[Code Q&A] Initial methods found: {len(initial_methods)}")
     
     initial_classes = search_code_chunks_supabase(
         query=query,
@@ -301,6 +307,7 @@ def generate_context_supabase(
         file_paths=file_filters,
         chunk_type='class'
     )
+    logger.info(f"[Code Q&A] Initial classes found: {len(initial_classes)}")
     
     # Also do direct file lookup if filters are specified
     if file_filters:
@@ -340,6 +347,7 @@ def generate_context_supabase(
         file_paths=file_filters,
         chunk_type='method'
     )
+    logger.info(f"[Code Q&A] Final methods found: {len(final_methods)}")
     
     final_classes = search_code_chunks_supabase(
         query=hyde_query_v2,
@@ -349,10 +357,12 @@ def generate_context_supabase(
         file_paths=file_filters,
         chunk_type='class'
     )
+    logger.info(f"[Code Q&A] Final classes found: {len(final_classes)}")
     
     # Filter by files if specified
     method_docs = _filter_chunks_by_files(final_methods, file_filters)
     class_docs = _filter_chunks_by_files(final_classes, file_filters)
+    logger.info(f"[Code Q&A] After filtering - methods: {len(method_docs)}, classes: {len(class_docs)}")
     
     search_time = time.time() - search_start
     timing_info["vector_search_time"] = round(search_time, 2)
@@ -371,6 +381,9 @@ def generate_context_supabase(
     )
     
     final_context = methods_combined + "\n below is class or constructor related code \n" + classes_combined
+    logger.info(f"[Code Q&A] Final context length: {len(final_context)} characters")
+    if len(final_context.strip()) == 0:
+        logger.warning("[Code Q&A] WARNING: Final context is empty! No code chunks retrieved.")
     
     total_time = time.time() - start_time
     timing_info["total_time"] = round(total_time, 2)
@@ -408,11 +421,19 @@ def query_codebase(query: str, file_filters: list = None):
                 provider = QwenProvider()
                 
                 # Generate context
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"[Code Q&A Query] Query: {cleaned_query[:100]}")
+                logger.info(f"[Code Q&A Query] File filters: {file_filters}")
+                
                 context, context_timing = generate_context_supabase(
                     query=cleaned_query,
                     file_filters=file_filters,
                     provider=provider
                 )
+                
+                logger.info(f"[Code Q&A Query] Context retrieved: {len(context)} chars")
+                logger.info(f"[Code Q&A Query] Context timing: {context_timing}")
                 
                 # Truncate context if needed
                 context_for_llm = context[:8000]
@@ -421,8 +442,10 @@ def query_codebase(query: str, file_filters: list = None):
                 
                 # Generate answer
                 if context_for_llm.strip():
+                    logger.info(f"[Code Q&A Query] Generating answer with context length: {len(context_for_llm)}")
                     answer, answer_timing = openai_chat(cleaned_query, context_for_llm)
                 else:
+                    logger.warning("[Code Q&A Query] Context is empty - returning 'No relevant code chunks' message")
                     answer = "No relevant code chunks found in the codebase."
                 
                 return {

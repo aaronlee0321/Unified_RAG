@@ -126,6 +126,10 @@ def vector_search_code_chunks(
         List of matching chunks with similarity scores
     """
     try:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[Supabase Code Search] threshold={threshold}, limit={limit}, file_path={file_path}, chunk_type={chunk_type}")
+        
         client = get_supabase_client()
         
         result = client.rpc(
@@ -139,8 +143,16 @@ def vector_search_code_chunks(
             }
         ).execute()
         
-        return result.data if result.data else []
+        results = result.data if result.data else []
+        logger.info(f"[Supabase Code Search] Found {len(results)} chunks")
+        if len(results) == 0:
+            logger.warning(f"[Supabase Code Search] No chunks found! Check if code_chunks table has data.")
+        
+        return results
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Supabase Code Search] Error: {e}")
         raise Exception(f"Error in Code vector search: {e}")
 
 def insert_gdd_document(doc_id: str, name: str, file_path: Optional[str] = None, file_size: Optional[int] = None) -> Dict[str, Any]:
