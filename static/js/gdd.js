@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let selectedDocument = null; // Track selected document
     let allDocumentsData = null; // Store all documents data for filtering
     const CHAT_STORAGE_KEY = 'gdd_chat_history';
+    let isUpdatingFromSelection = false; // Flag to prevent circular updates
     
     // If this page load is a hard refresh, clear any persisted chat history
     try {
@@ -42,6 +43,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
+    // Sync input box with @documentname patterns
+    queryInput.addEventListener('input', function() {
+        if (!isUpdatingFromSelection) {
+            syncSelectionFromInput();
+        }
+    });
+    
     // Upload file
     uploadBtn.addEventListener('click', uploadFile);
     
@@ -49,21 +57,34 @@ document.addEventListener('DOMContentLoaded', function() {
         const query = queryInput.value.trim();
         if (!query) return;
         
-        // Add user message
+        // Extract query text (remove @documentname patterns for the actual query)
+        const queryParts = query.split(/\s+/);
+        const queryText = queryParts.filter(part => !part.startsWith('@')).join(' ');
+        
+        // Add user message (show the full input including @patterns)
         addMessage(query, 'user');
-        queryInput.value = '';
+        
+        // Clear input but preserve @documentname pattern if document is selected
+        if (selectedDocument && selectedDocument !== 'All Documents') {
+            // Extract document name and set input to just @documentname with space
+            const docName = selectedDocument.split(' (')[0]; // Remove (doc_id) part
+            const cleanDocName = docName.replace(/[()]/g, '').trim();
+            queryInput.value = `@${cleanDocName} `; // Add space after @filename
+        } else {
+            queryInput.value = '';
+        }
         
         // Show typing indicator
         const typingIndicator = addTypingIndicator();
         
-        // Send to API with selected document
+        // Send to API with selected document (use the text query, selected_doc is already set)
         fetch('/api/gdd/query', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                query: query,
+                query: queryText || query, // Use queryText if available, fallback to full query
                 selected_doc: selectedDocument
             })
         })
@@ -148,20 +169,6 @@ document.addEventListener('DOMContentLoaded', function() {
         // Get current search term
         const searchTerm = documentSearch.value.toLowerCase().trim();
         
-        // Create "All Documents" option (always show if no search or matches)
-        if (!searchTerm || 'all documents'.includes(searchTerm)) {
-            const allDocsItem = document.createElement('div');
-            allDocsItem.className = 'document-item';
-            if (!selectedDocument || selectedDocument === 'All Documents') {
-                allDocsItem.classList.add('selected');
-            }
-            allDocsItem.innerHTML = '<span class="name">All Documents</span>';
-            allDocsItem.addEventListener('click', function() {
-                selectDocument('All Documents', allDocsItem);
-            });
-            documentsList.appendChild(allDocsItem);
-        }
-        
         // Filter documents based on search term
         const filteredDocs = data.documents.filter(doc => {
             if (!searchTerm) return true;
@@ -173,6 +180,49 @@ document.addEventListener('DOMContentLoaded', function() {
         if (filteredDocs.length === 0 && searchTerm) {
             documentsList.innerHTML = '<p style="font-size:0.85rem;color:#666;">No documents match your search.</p>';
             return;
+        }
+        
+        // Sort documents: selected document first, then unselected documents
+        filteredDocs.sort((a, b) => {
+            const aOptionValue = data.options ? 
+                data.options.find(opt => opt.includes(a.name || a.doc_id) || opt.includes(a.doc_id)) : 
+                `${a.name || a.doc_id} (${a.doc_id})`;
+            const bOptionValue = data.options ? 
+                data.options.find(opt => opt.includes(b.name || b.doc_id) || opt.includes(b.doc_id)) : 
+                `${b.name || b.doc_id} (${b.doc_id})`;
+            
+            const aSelected = selectedDocument === aOptionValue;
+            const bSelected = selectedDocument === bOptionValue;
+            
+            if (aSelected && !bSelected) return -1; // a comes first
+            if (!aSelected && bSelected) return 1;  // b comes first
+            return 0; // Keep original order for documents with same selection status
+        });
+        
+        // Create "All Documents" option (always show if no search or matches, and at top if selected)
+        const showAllDocs = !searchTerm || 'all documents'.includes(searchTerm);
+        const allDocsSelected = !selectedDocument || selectedDocument === 'All Documents';
+        
+        if (showAllDocs) {
+            // If "All Documents" is selected, show it first; otherwise show it after selected document
+            const allDocsItem = document.createElement('div');
+            allDocsItem.className = 'document-item';
+            if (allDocsSelected) {
+                allDocsItem.classList.add('selected');
+            }
+            allDocsItem.innerHTML = '<span class="name">All Documents</span>';
+            allDocsItem.dataset.docValue = 'All Documents';
+            allDocsItem.addEventListener('click', function() {
+                selectDocument('All Documents', allDocsItem);
+            });
+            
+            // Insert at top if selected, otherwise append
+            if (allDocsSelected && filteredDocs.length > 0 && selectedDocument && selectedDocument !== 'All Documents') {
+                // Selected document will be first, so insert All Documents after first group
+                // We'll handle this after creating groups
+            } else {
+                documentsList.appendChild(allDocsItem);
+            }
         }
         
         // Group documents by derived category for nicer headings
@@ -225,9 +275,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     docItem.classList.add('selected');
                 }
                 
-            docItem.innerHTML = `
-                <span class="name">${displayName}</span>
-            `;
+                docItem.innerHTML = `<span class="name">${displayName}</span>`;
+                docItem.dataset.docValue = optionValue; // Store optionValue for easier access
+                docItem.title = optionValue; // Store in title for easier access
                 
                 docItem.addEventListener('click', function() {
                     selectDocument(optionValue, docItem);
@@ -239,6 +289,9 @@ document.addEventListener('DOMContentLoaded', function() {
             groupWrapper.appendChild(docList);
             documentsList.appendChild(groupWrapper);
         });
+        
+        // After rendering, update selection UI to ensure consistency
+        updateDocumentSelectionUI();
     }
     
     function filterDocuments(searchTerm) {
@@ -262,13 +315,106 @@ document.addEventListener('DOMContentLoaded', function() {
         // Update selected document
         selectedDocument = docValue === 'All Documents' ? null : docValue;
         
-        // Update query input placeholder to show selected document
-        if (docValue === 'All Documents' || !docValue) {
-            queryInput.placeholder = 'Ask a question about the game design documents...';
-        } else {
-            const docName = docValue.split(' (')[0]; // Extract document name
-            queryInput.placeholder = `Ask a question about "${docName}"...`;
+        // Re-render documents to move selected document to top
+        if (allDocumentsData) {
+            renderDocuments(allDocumentsData);
         }
+        
+        // Update input box with @documentname pattern
+        syncInputFromSelection();
+    }
+    
+    function syncInputFromSelection() {
+        if (!allDocumentsData) return;
+        
+        isUpdatingFromSelection = true;
+        
+        // Get current input value
+        const currentValue = queryInput.value;
+        
+        // Extract the query part (everything that's not @documentname)
+        const queryParts = currentValue.split(/\s+/);
+        const queryText = queryParts.filter(part => !part.startsWith('@')).join(' ');
+        
+        // Build new input value with @documentname pattern
+        if (selectedDocument && selectedDocument !== 'All Documents') {
+            // Extract document name from option value
+            const docName = selectedDocument.split(' (')[0]; // Remove (doc_id) part
+            const cleanDocName = docName.replace(/[()]/g, '').trim();
+            const newValue = `@${cleanDocName} ${queryText}`.trim(); // Space after @documentname
+            queryInput.value = newValue;
+        } else {
+            // No document selected, just keep query text
+            queryInput.value = queryText;
+        }
+        
+        isUpdatingFromSelection = false;
+    }
+    
+    function syncSelectionFromInput() {
+        if (!allDocumentsData) return;
+        
+        const inputValue = queryInput.value;
+        
+        // Extract @documentname pattern from input
+        const atPattern = inputValue.match(/@(\S+)/);
+        if (!atPattern) {
+            // No @pattern found, deselect if something was selected
+            if (selectedDocument && selectedDocument !== 'All Documents') {
+                selectedDocument = null;
+                updateDocumentSelectionUI();
+            }
+            return;
+        }
+        
+        const docNameFromInput = atPattern[1];
+        
+        // Find matching document
+        let matchedDoc = null;
+        let matchedOptionValue = null;
+        
+        // Check all documents
+        allDocumentsData.documents.forEach(doc => {
+            const rawName = doc.name || doc.doc_id || 'Unknown';
+            const displayName = parseDocumentName(rawName).displayTitle;
+            const optionValue = allDocumentsData.options ? 
+                allDocumentsData.options.find(opt => opt.includes(rawName) || opt.includes(doc.doc_id)) : 
+                `${rawName} (${doc.doc_id})`;
+            
+            // Try to match by display name or raw name
+            if (displayName.toLowerCase() === docNameFromInput.toLowerCase() ||
+                rawName.toLowerCase().includes(docNameFromInput.toLowerCase()) ||
+                optionValue.toLowerCase().includes(docNameFromInput.toLowerCase())) {
+                matchedDoc = doc;
+                matchedOptionValue = optionValue;
+            }
+        });
+        
+        // Update selectedDocument if match found
+        if (matchedOptionValue && selectedDocument !== matchedOptionValue) {
+            selectedDocument = matchedOptionValue;
+            // Re-render to move selected document to top
+            renderDocuments(allDocumentsData);
+        } else if (!matchedOptionValue && selectedDocument) {
+            // No match found, deselect
+            selectedDocument = null;
+            updateDocumentSelectionUI();
+        }
+    }
+    
+    function updateDocumentSelectionUI() {
+        // Update all document items to show selection state
+        const docItems = documentsList.querySelectorAll('.document-item');
+        docItems.forEach(item => {
+            const docValue = item.dataset.docValue || item.title;
+            if (docValue === 'All Documents' && !selectedDocument) {
+                item.classList.add('selected');
+            } else if (selectedDocument === docValue) {
+                item.classList.add('selected');
+            } else {
+                item.classList.remove('selected');
+            }
+        });
     }
     
     function addMessage(text, type, fromHistory) {

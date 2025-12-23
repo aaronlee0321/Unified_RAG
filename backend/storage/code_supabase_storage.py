@@ -35,7 +35,7 @@ else:
 def normalize_path_consistent(path: str) -> Optional[str]:
     """
     Normalize file path consistently for matching.
-    Same function as in code_qa/app.py - uses normcase for case-insensitive matching
+    Handles Windows paths from frontend and converts them to match database format.
     """
     if path is None:
         return None
@@ -43,11 +43,46 @@ def normalize_path_consistent(path: str) -> Optional[str]:
         p_str = str(path).strip()
         if not p_str:
             return None
-        # Always convert to absolute and normalize case (normcase)
-        abs_path = os.path.abspath(p_str)
-        norm_path = os.path.normcase(abs_path)
+        
+        # Handle Windows paths from frontend (e.g., c:\users\...)
+        # Extract the relative path portion (after codebase root)
+        # Common patterns: codebase_rag/... or Assets/...
+        p_str_normalized = p_str.replace('\\', '/')
+        p_str_lower = p_str_normalized.lower()
+        
+        # Try to find the codebase root marker
+        # Look for common path segments that indicate the codebase structure
+        markers = ['codebase_rag/', 'assets/', 'tank_online', '_gameassets/', '_gamemodules/']
+        relative_path = None
+        for marker in markers:
+            idx = p_str_lower.find(marker.lower())
+            if idx != -1:
+                # Extract everything from marker onwards
+                relative_path = p_str_normalized[idx:].replace('\\', '/')
+                break
+        
+        if relative_path:
+            # Normalize: use forward slashes, but preserve case for Assets/ and _GameAssets/
+            # The database might have mixed case, so we'll use ILIKE matching instead of lowercasing
+            norm_path = relative_path.replace('\\', '/')
+            # Don't lowercase - let ILIKE handle case-insensitive matching
+            return norm_path
+        
+        # Fallback: if no marker found, try to extract filename or last few path segments
+        # This handles cases where full path is provided
+        path_parts = p_str.replace('\\', '/').split('/')
+        # Take last 4-5 segments (should cover most of the relative path)
+        if len(path_parts) >= 4:
+            relative_path = '/'.join(path_parts[-4:])
+            return relative_path.lower()
+        
+        # Last resort: just normalize the path
+        norm_path = os.path.normcase(p_str.replace('\\', '/'))
         return norm_path
-    except Exception:
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Path normalization failed for {path}: {e}")
         return None
 
 
@@ -80,18 +115,48 @@ def search_code_chunks_supabase(
     all_results = []
     
     if file_paths:
-        # Normalize file paths for filtering
-        normalized_paths = {normalize_path_consistent(p) for p in file_paths if normalize_path_consistent(p)}
-        
-        for file_path in normalized_paths:
-            results = vector_search_code_chunks(
+        import logging
+        import os
+        logger = logging.getLogger(__name__)
+        logger.info(f"[Code Search] Original file_paths from frontend: {file_paths}")
+
+        # Instead of trying to match the full absolute path (which can differ between
+        # local and server environments), we filter by filename only. The database
+        # stores full Windows-style paths, and we know from diagnostics that
+        # ILIKE '%filename.cs%' matches correctly.
+        filenames: List[str] = []
+        for p in file_paths:
+            if not p:
+                continue
+            base = os.path.basename(p)
+            if base:
+                filenames.append(base)
+                logger.info(f"[Code Search] Using filename filter '{base}' for path '{p}'")
+
+        filename_set = set(filenames)
+        logger.info(f"[Code Search] Unique filename filters: {list(filename_set)}")
+
+        if not filename_set:
+            logger.warning("[Code Search] WARNING: No valid filenames derived from file_paths. Falling back to search without file filter.")
+            all_results = vector_search_code_chunks(
                 query_embedding=query_embedding,
                 limit=limit,
                 threshold=threshold,
-                file_path=file_path,
-                chunk_type=chunk_type
+                file_path=None,
+                chunk_type=chunk_type,
             )
-            all_results.extend(results)
+        else:
+            for filename in filename_set:
+                logger.info(f"[Code Search] Searching with filename filter: '{filename}'")
+                results = vector_search_code_chunks(
+                    query_embedding=query_embedding,
+                    limit=limit,
+                    threshold=threshold,
+                    file_path=filename,
+                    chunk_type=chunk_type,
+                )
+                logger.info(f"[Code Search] Found {len(results)} results for filename '{filename}'")
+                all_results.extend(results)
         
         # Remove duplicates (same chunk might match multiple normalized paths)
         seen = set()
@@ -102,6 +167,9 @@ def search_code_chunks_supabase(
                 seen.add(chunk_id)
                 unique_results.append(result)
         all_results = unique_results
+        
+        # Summary log
+        logger.info(f"[Code Search] SUMMARY: Found {len(all_results)} total unique chunks (chunk_type={chunk_type})")
     else:
         # Search all files
         all_results = vector_search_code_chunks(
@@ -111,12 +179,15 @@ def search_code_chunks_supabase(
             file_path=None,
             chunk_type=chunk_type
         )
+        logger.info(f"[Code Search] No file filter: Found {len(all_results)} chunks (chunk_type={chunk_type})")
     
     # Sort by similarity (descending)
     all_results.sort(key=lambda x: x.get('similarity', 0.0), reverse=True)
     
     # Limit to requested number
-    return all_results[:limit]
+    final_results = all_results[:limit]
+    logger.info(f"[Code Search] Returning {len(final_results)} chunks after sorting and limiting (chunk_type={chunk_type})")
+    return final_results
 
 
 def get_code_chunks_for_files(
@@ -138,19 +209,30 @@ def get_code_chunks_for_files(
         return []
     
     try:
+        import logging
+        logger = logging.getLogger(__name__)
         from backend.storage.supabase_client import get_supabase_client
         
         client = get_supabase_client()
         all_chunks = []
         
-        # Normalize paths
-        normalized_paths = {normalize_path_consistent(p) for p in file_paths if normalize_path_consistent(p)}
+        # Extract filenames from paths (same as vector search)
+        filenames = []
+        for p in file_paths:
+            if not p:
+                continue
+            base = os.path.basename(p)
+            if base:
+                filenames.append(base)
         
-        for norm_path in normalized_paths:
+        filename_set = set(filenames)
+        logger.info(f"[Direct File Lookup] Looking up chunks for filenames: {list(filename_set)} (chunk_type={chunk_type})")
+        
+        for filename in filename_set:
             query = client.table('code_chunks').select('*')
             
-            # Filter by file_path
-            query = query.eq('file_path', norm_path)
+            # Match by filename using ilike (case-insensitive)
+            query = query.ilike('file_path', f'%{filename}%')
             
             # Filter by chunk_type if specified
             if chunk_type:
@@ -158,12 +240,18 @@ def get_code_chunks_for_files(
             
             result = query.execute()
             
-            if result.data:
-                all_chunks.extend(result.data)
+            chunks_found = result.data if result.data else []
+            logger.info(f"[Direct File Lookup] Found {len(chunks_found)} chunks for filename '{filename}' (chunk_type={chunk_type})")
+            
+            if chunks_found:
+                all_chunks.extend(chunks_found)
         
+        logger.info(f"[Direct File Lookup] TOTAL: Found {len(all_chunks)} chunks via direct lookup (chunk_type={chunk_type})")
         return all_chunks
     except Exception as e:
-        print(f"Error getting chunks for files: {e}")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Direct File Lookup] Error getting chunks for files: {e}")
         return []
 
 

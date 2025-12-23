@@ -132,21 +132,93 @@ def vector_search_code_chunks(
         
         client = get_supabase_client()
         
-        result = client.rpc(
-            'match_code_chunks',
-            {
-                'query_embedding': query_embedding,
-                'match_threshold': threshold,
-                'match_count': limit,
-                'file_path_filter': file_path,
-                'chunk_type_filter': chunk_type
-            }
-        ).execute()
-        
-        results = result.data if result.data else []
-        logger.info(f"[Supabase Code Search] Found {len(results)} chunks")
-        if len(results) == 0:
-            logger.warning(f"[Supabase Code Search] No chunks found! Check if code_chunks table has data.")
+        # If file_path is provided, try multiple matching strategies
+        if file_path:
+            results = []
+            strategy_used = None
+            
+            # Strategy 1: Try with the provided path
+            result = client.rpc(
+                'match_code_chunks',
+                {
+                    'query_embedding': query_embedding,
+                    'match_threshold': threshold,
+                    'match_count': limit,
+                    'file_path_filter': file_path,
+                    'chunk_type_filter': chunk_type
+                }
+            ).execute()
+            
+            results = result.data if result.data else []
+            if len(results) > 0:
+                strategy_used = "Strategy 1 (provided path)"
+                logger.info(f"[Supabase Code Search] {strategy_used}: Found {len(results)} chunks with path '{file_path}'")
+            else:
+                logger.info(f"[Supabase Code Search] Strategy 1 (provided path): No chunks found with path '{file_path}'")
+            
+            # Strategy 2: If no results, try with just the filename
+            if len(results) == 0:
+                filename = file_path.split('/')[-1] if '/' in file_path else (file_path.split('\\')[-1] if '\\' in file_path else file_path)
+                logger.info(f"[Supabase Code Search] Trying Strategy 2 (filename only): '{filename}'")
+                result = client.rpc(
+                    'match_code_chunks',
+                    {
+                        'query_embedding': query_embedding,
+                        'match_threshold': threshold,
+                        'match_count': limit,
+                        'file_path_filter': filename,
+                        'chunk_type_filter': chunk_type
+                    }
+                ).execute()
+                results = result.data if result.data else []
+                if len(results) > 0:
+                    strategy_used = f"Strategy 2 (filename: '{filename}')"
+                    logger.info(f"[Supabase Code Search] {strategy_used}: Found {len(results)} chunks")
+                else:
+                    logger.info(f"[Supabase Code Search] Strategy 2 (filename): No chunks found")
+            
+            # Strategy 3: If still no results, try last 2-3 path segments
+            if len(results) == 0 and ('/' in file_path or '\\' in file_path):
+                path_parts = file_path.replace('\\', '/').split('/')
+                if len(path_parts) >= 2:
+                    last_segments = '/'.join(path_parts[-2:])
+                    logger.info(f"[Supabase Code Search] Trying Strategy 3 (last segments): '{last_segments}'")
+                    result = client.rpc(
+                        'match_code_chunks',
+                        {
+                            'query_embedding': query_embedding,
+                            'match_threshold': threshold,
+                            'match_count': limit,
+                            'file_path_filter': last_segments,
+                            'chunk_type_filter': chunk_type
+                        }
+                    ).execute()
+                    results = result.data if result.data else []
+                    if len(results) > 0:
+                        strategy_used = f"Strategy 3 (last segments: '{last_segments}')"
+                        logger.info(f"[Supabase Code Search] {strategy_used}: Found {len(results)} chunks")
+                    else:
+                        logger.info(f"[Supabase Code Search] Strategy 3 (last segments): No chunks found")
+            
+            # Final summary
+            if len(results) > 0:
+                logger.info(f"[Supabase Code Search] SUCCESS: Found {len(results)} chunks using {strategy_used}")
+            elif file_path:
+                logger.warning(f"[Supabase Code Search] FAILED: No chunks found for path '{file_path}' after trying all strategies")
+        else:
+            # No file filter - search all
+            result = client.rpc(
+                'match_code_chunks',
+                {
+                    'query_embedding': query_embedding,
+                    'match_threshold': threshold,
+                    'match_count': limit,
+                    'file_path_filter': None,
+                    'chunk_type_filter': chunk_type
+                }
+            ).execute()
+            results = result.data if result.data else []
+            logger.info(f"[Supabase Code Search] No file filter: Found {len(results)} chunks")
         
         return results
     except Exception as e:

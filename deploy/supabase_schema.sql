@@ -161,7 +161,7 @@ BEGIN
     FROM code_chunks cc
     WHERE 
         cc.embedding IS NOT NULL
-        AND (file_path_filter IS NULL OR cc.file_path = file_path_filter)
+        AND (file_path_filter IS NULL OR cc.file_path ILIKE '%' || file_path_filter || '%')
         AND (chunk_type_filter IS NULL OR cc.chunk_type = chunk_type_filter)
         AND (1 - (cc.embedding <=> query_embedding)) >= match_threshold
     ORDER BY cc.embedding <=> query_embedding

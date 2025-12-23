@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let selectedFiles = []; // Track selected files
     let allFilesData = null; // Store all files for filtering
     const CHAT_STORAGE_KEY = 'code_chat_history';
+    let isUpdatingFromSelection = false; // Flag to prevent circular updates
     
     // If this page load is a hard refresh, clear any persisted chat history
     try {
@@ -39,25 +40,45 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
+    // Sync input box with @filename patterns
+    queryInput.addEventListener('input', function() {
+        if (!isUpdatingFromSelection) {
+            syncSelectionFromInput();
+        }
+    });
+    
     function sendQuery() {
         const query = queryInput.value.trim();
         if (!query) return;
         
-        // Add user message
+        // Extract query text (remove @filename patterns for the actual query)
+        const queryParts = query.split(/\s+/);
+        const queryText = queryParts.filter(part => !part.startsWith('@')).join(' ');
+        
+        // Add user message (show the full input including @patterns)
         addMessage(query, 'user');
-        queryInput.value = '';
+        
+        // Clear input but preserve @filename patterns if files are selected
+        if (selectedFiles.length > 0) {
+            // Reset input so that only @filename patterns remain after this send.
+            // This ensures the question text is cleared while keeping the file filter.
+            queryInput.value = '';
+            syncInputFromSelection();
+        } else {
+            queryInput.value = '';
+        }
         
         // Show typing indicator
         const typingIndicator = addTypingIndicator();
         
-        // Send to API
+        // Send to API (use the text query, file_filters are already set from selectedFiles)
         fetch('/api/code/query', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                query: query,
+                query: queryText || query, // Use queryText if available, fallback to full query
                 file_filters: selectedFiles.length > 0 ? selectedFiles : null,
                 rerank: false  // Reranking disabled
             })
@@ -116,6 +137,18 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
+        // Sort files: selected files first, then unselected files
+        filteredFiles.sort((a, b) => {
+            const aPath = a.file_path || a.path || a.normalized_path || '';
+            const bPath = b.file_path || b.path || b.normalized_path || '';
+            const aSelected = selectedFiles.includes(aPath);
+            const bSelected = selectedFiles.includes(bPath);
+            
+            if (aSelected && !bSelected) return -1; // a comes first
+            if (!aSelected && bSelected) return 1;  // b comes first
+            return 0; // Keep original order for files with same selection status
+        });
+        
         // Create file list
         const fileList = document.createElement('ul');
         fileList.className = 'document-list';
@@ -136,6 +169,8 @@ document.addEventListener('DOMContentLoaded', function() {
             fileItem.innerHTML = `<span class="name">${fileName}</span>`;
             fileItem.title = filePath; // Show full path on hover
             
+            fileItem.dataset.filePath = filePath; // Store filePath in dataset for easier access
+            
             fileItem.addEventListener('click', function() {
                 toggleFileSelection(filePath, fileItem);
             });
@@ -144,6 +179,9 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         filesList.appendChild(fileList);
+        
+        // After rendering, update selection UI to ensure consistency
+        updateFileSelectionUI();
     }
     
     function filterFiles(searchTerm) {
@@ -165,16 +203,92 @@ document.addEventListener('DOMContentLoaded', function() {
             element.classList.add('selected');
         }
         
-        // Update query input placeholder
-        if (selectedFiles.length > 0) {
-            const fileNames = selectedFiles.map(p => {
-                const file = allFilesData.find(f => (f.file_path || f.path) === p);
-                return file ? (file.file_name || file.name) : p.split('/').pop();
-            });
-            queryInput.placeholder = `Querying ${fileNames.length} file(s): ${fileNames[0]}${fileNames.length > 1 ? '...' : ''}`;
-        } else {
-            queryInput.placeholder = 'Ask a question about the codebase (e.g., @DatabaseManager.cs what methods are defined?)...';
+        // Re-render files to move selected files to top
+        if (allFilesData) {
+            renderFiles(allFilesData);
         }
+        
+        // Update input box with @filename patterns
+        syncInputFromSelection();
+    }
+    
+    function syncInputFromSelection() {
+        if (!allFilesData) return;
+        
+        isUpdatingFromSelection = true;
+        
+        // Get current input value
+        const currentValue = queryInput.value;
+        
+        // Extract the query part (everything that's not @filename)
+        const queryParts = currentValue.split(/\s+/);
+        const queryText = queryParts.filter(part => !part.startsWith('@')).join(' ');
+        
+        // Build new input value with @filename patterns
+        const atPatterns = selectedFiles.map(filePath => {
+            const file = allFilesData.find(f => (f.file_path || f.path) === filePath);
+            const fileName = file ? (file.file_name || file.name) : filePath.split(/[/\\]/).pop();
+            return `@${fileName} `; // Add space after each @filename
+        });
+        
+        // Combine @patterns and query text
+        const newValue = [...atPatterns, queryText].filter(s => s.trim()).join(' ').trim();
+        queryInput.value = newValue;
+        
+        isUpdatingFromSelection = false;
+    }
+    
+    function syncSelectionFromInput() {
+        if (!allFilesData) return;
+        
+        const inputValue = queryInput.value;
+        
+        // Extract all @filename patterns from input
+        const atPatterns = inputValue.match(/@(\S+)/g) || [];
+        const fileNamesFromInput = atPatterns.map(pattern => pattern.substring(1)); // Remove @
+        
+        // Find matching files
+        const newSelectedFiles = [];
+        fileNamesFromInput.forEach(fileName => {
+            // Try to find exact match by file_name
+            const file = allFilesData.find(f => {
+                const fName = (f.file_name || f.name || '').toLowerCase();
+                const fPath = (f.file_path || f.path || '').toLowerCase();
+                return fName === fileName.toLowerCase() || 
+                       fPath.toLowerCase().endsWith(fileName.toLowerCase());
+            });
+            if (file) {
+                const filePath = file.file_path || file.path;
+                if (filePath && !newSelectedFiles.includes(filePath)) {
+                    newSelectedFiles.push(filePath);
+                }
+            }
+        });
+        
+        // Update selectedFiles
+        const selectionChanged = JSON.stringify(selectedFiles.sort()) !== JSON.stringify(newSelectedFiles.sort());
+        selectedFiles = newSelectedFiles;
+        
+        // Re-render files to move selected files to top if selection changed
+        if (selectionChanged && allFilesData) {
+            renderFiles(allFilesData);
+        } else {
+            // Update UI to reflect selection
+            updateFileSelectionUI();
+        }
+    }
+    
+    function updateFileSelectionUI() {
+        // Update all file items to show selection state
+        const fileItems = filesList.querySelectorAll('.document-item');
+        fileItems.forEach(item => {
+            const filePath = item.title; // We store filePath in title attribute
+            if (selectedFiles.includes(filePath)) {
+                item.classList.add('selected');
+            } else {
+                item.classList.remove('selected');
+            }
+        });
     }
     
     function addMessage(text, type, fromHistory) {
