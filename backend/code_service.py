@@ -97,14 +97,6 @@ client = OpenAI(api_key=api_key, base_url=base_url)
 _hyde_model = os.environ.get("HYDE_MODEL", "qwen-plus")
 _answer_model = os.environ.get("ANSWER_MODEL", "qwen-flash")
 
-# Initialize reranker (optional)
-reranker = None
-try:
-    from lancedb.rerankers import AnswerdotaiRerankers
-    reranker = AnswerdotaiRerankers(column="source_code")
-except Exception as e:
-    print(f"Warning: Reranker initialization failed: {e}. Reranking will be disabled.")
-
 
 def parse_cs_file_filter(raw_query: str):
     """
@@ -259,16 +251,14 @@ def _filter_chunks_by_files(chunks: List[Dict], allowed_paths: Optional[List[str
 
 def generate_context_supabase(
     query: str,
-    rerank: bool = False,
     file_filters: Optional[List[str]] = None,
     provider = None
 ) -> tuple[str, Dict]:
     """
-    Generate context from Supabase using vector search, HYDE v2, and reranking.
+    Generate context from Supabase using vector search and HYDE v2.
     
     Args:
         query: User query
-        rerank: Whether to use reranking
         file_filters: Optional list of file paths to filter by
         provider: LLM provider for embeddings
     
@@ -280,8 +270,7 @@ def generate_context_supabase(
     
     start_time = time.time()
     timing_info = {
-        "query": query,
-        "rerank_enabled": rerank
+        "query": query
     }
     
     # Initialize provider if not provided
@@ -365,12 +354,6 @@ def generate_context_supabase(
     method_docs = _filter_chunks_by_files(final_methods, file_filters)
     class_docs = _filter_chunks_by_files(final_classes, file_filters)
     
-    # Step 5: Reranking (if enabled)
-    if rerank and reranker is not None:
-        # Reranker expects specific format - would need to adapt
-        # For now, skip reranking with Supabase
-        pass
-    
     search_time = time.time() - search_start
     timing_info["vector_search_time"] = round(search_time, 2)
     
@@ -397,14 +380,13 @@ def generate_context_supabase(
     return final_context, timing_info
 
 
-def query_codebase(query: str, file_filters: list = None, rerank: bool = False):
+def query_codebase(query: str, file_filters: list = None):
     """
     Query codebase using RAG with Supabase.
     
     Args:
         query: User query string
         file_filters: Optional list of file paths to filter by
-        rerank: Whether to use reranking
     
     Returns:
         dict: Response with answer and metadata
@@ -428,7 +410,6 @@ def query_codebase(query: str, file_filters: list = None, rerank: bool = False):
                 # Generate context
                 context, context_timing = generate_context_supabase(
                     query=cleaned_query,
-                    rerank=rerank,
                     file_filters=file_filters,
                     provider=provider
                 )

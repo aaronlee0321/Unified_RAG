@@ -28,28 +28,38 @@ except ImportError:
     print("Warning: Supabase storage not available, using local file storage")
 
 # Import gdd_rag_backbone (now included in unified_rag_app)
-from gdd_rag_backbone.config import DEFAULT_DOCS_DIR, DEFAULT_WORKING_DIR
-from gdd_rag_backbone.llm_providers import (
-    QwenProvider,
-    make_embedding_func,
-)
-from gdd_rag_backbone.rag_backend.markdown_chunk_qa import (
-    get_markdown_top_chunks,
-    list_markdown_indexed_docs,
-)
-from gdd_rag_backbone.scripts.chunk_markdown_files import (
-    generate_doc_id as generate_md_doc_id,
-    save_chunks as save_md_chunks,
-)
-from gdd_rag_backbone.scripts.index_markdown_chunks import index_chunks_for_doc
-from gdd_rag_backbone.markdown_chunking import MarkdownChunker
-GDD_RAG_BACKBONE_AVAILABLE = True
-
-# Ensure directories exist (relative to unified_rag_app)
-DEFAULT_DOCS_DIR = PROJECT_ROOT / "docs"
-DEFAULT_WORKING_DIR = PROJECT_ROOT / "rag_storage"
-DEFAULT_DOCS_DIR.mkdir(parents=True, exist_ok=True)
-DEFAULT_WORKING_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    from gdd_rag_backbone.config import DEFAULT_DOCS_DIR, DEFAULT_WORKING_DIR
+    from gdd_rag_backbone.llm_providers import (
+        QwenProvider,
+        make_embedding_func,
+    )
+    from gdd_rag_backbone.rag_backend.markdown_chunk_qa import (
+        get_markdown_top_chunks,
+        list_markdown_indexed_docs,
+    )
+    from gdd_rag_backbone.scripts.chunk_markdown_files import (
+        generate_doc_id as generate_md_doc_id,
+        save_chunks as save_md_chunks,
+    )
+    from gdd_rag_backbone.scripts.index_markdown_chunks import index_chunks_for_doc
+    from gdd_rag_backbone.markdown_chunking import MarkdownChunker
+    GDD_RAG_BACKBONE_AVAILABLE = True
+    
+    # Ensure directories exist (relative to unified_rag_app)
+    DEFAULT_DOCS_DIR = PROJECT_ROOT / "docs"
+    DEFAULT_WORKING_DIR = PROJECT_ROOT / "rag_storage"
+    DEFAULT_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    DEFAULT_WORKING_DIR.mkdir(parents=True, exist_ok=True)
+except ImportError as e:
+    import sys
+    import traceback
+    print(f"[ERROR] Failed to import gdd_rag_backbone: {e}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    GDD_RAG_BACKBONE_AVAILABLE = False
+    # Set defaults to avoid NameError
+    DEFAULT_DOCS_DIR = PROJECT_ROOT / "docs"
+    DEFAULT_WORKING_DIR = PROJECT_ROOT / "rag_storage"
 
 
 def _detect_question_language(text: str) -> str:
@@ -260,28 +270,44 @@ def list_documents():
     Returns:
         list: List of document metadata dictionaries
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info("=" * 60)
+    logger.info("list_documents() called")
+    logger.info(f"SUPABASE_AVAILABLE: {SUPABASE_AVAILABLE}")
+    logger.info(f"GDD_RAG_BACKBONE_AVAILABLE: {GDD_RAG_BACKBONE_AVAILABLE}")
+    
     try:
         if SUPABASE_AVAILABLE:
+            logger.info("Attempting to load from Supabase...")
             # Try Supabase first
             try:
                 docs = list_gdd_documents_supabase()
+                logger.info(f"list_gdd_documents_supabase() returned {len(docs)} documents")
                 if docs:
-                    print(f"Loaded {len(docs)} documents from Supabase")
+                    logger.info(f"[OK] Successfully loaded {len(docs)} documents from Supabase")
+                    if len(docs) > 0:
+                        logger.info(f"Sample document: {docs[0].get('name', 'N/A')}")
                     return docs
                 else:
-                    print("Warning: Supabase returned empty list, trying local storage")
+                    logger.warning("⚠️ Supabase returned empty list, trying local storage")
             except Exception as e:
                 import traceback
-                print(f"Warning: Failed to load from Supabase, trying local storage: {e}")
-                traceback.print_exc()
+                logger.error(f"❌ Failed to load from Supabase: {e}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+        else:
+            logger.warning("SUPABASE_AVAILABLE is False, skipping Supabase")
         
         # Fallback to local storage (only if gdd_rag_backbone is available)
         if not GDD_RAG_BACKBONE_AVAILABLE:
-            print("Warning: Cannot fallback to local storage - gdd_rag_backbone not available")
+            logger.warning("⚠️ Cannot fallback to local storage - gdd_rag_backbone not available")
+            logger.info("=" * 60)
             return []
         
-        print("Attempting to load from local storage...")
+        logger.info("Attempting to load from local storage...")
         markdown_docs = list_markdown_indexed_docs()
+        logger.info(f"list_markdown_indexed_docs() returned {len(markdown_docs)} documents")
         
         documents = []
         for doc in sorted(markdown_docs, key=lambda x: x["doc_id"]):
@@ -298,12 +324,14 @@ def list_documents():
                 'status': 'ready' if chunks_count > 0 else 'indexed'
             })
         
-        print(f"Loaded {len(documents)} documents from local storage")
+        logger.info(f"✅ Loaded {len(documents)} documents from local storage")
+        logger.info("=" * 60)
         return documents
     except Exception as e:
         import traceback
-        print(f"Error listing documents: {e}")
-        traceback.print_exc()
+        logger.error(f"❌ Error listing documents: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.info("=" * 60)
         return []
 
 

@@ -45,11 +45,38 @@ def setup_logging(config):
     return logger
 
 # Create Flask app
-app = Flask(__name__)
-app.config.update(CONFIG)
-app.logger = setup_logging(app.config)
+try:
+    app = Flask(__name__)
+    app.config.update(CONFIG)
+    app.logger = setup_logging(app.config)
+    app.logger.info("Flask app object created successfully")
+except Exception as e:
+    import sys
+    import traceback
+    print(f"[FATAL] Failed to create Flask app: {e}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    raise
+
+# Log startup configuration
+app.logger.info("=" * 60)
+app.logger.info("Flask app initializing...")
+app.logger.info(f"Project root: {PROJECT_ROOT}")
+
+# Check Supabase configuration
+supabase_url = os.getenv('SUPABASE_URL')
+supabase_key = os.getenv('SUPABASE_KEY')
+supabase_service_key = os.getenv('SUPABASE_SERVICE_KEY')
+app.logger.info(f"SUPABASE_URL: {'SET' if supabase_url else 'NOT SET'}")
+if supabase_url:
+    app.logger.info(f"SUPABASE_URL value: {supabase_url[:30]}...")
+app.logger.info(f"SUPABASE_KEY: {'SET' if supabase_key else 'NOT SET'}")
+if supabase_key:
+    app.logger.info(f"SUPABASE_KEY starts with: {supabase_key[:20]}...")
+app.logger.info(f"SUPABASE_SERVICE_KEY: {'SET' if supabase_service_key else 'NOT SET'}")
+app.logger.info(f"DASHSCOPE_API_KEY: {'SET' if os.getenv('DASHSCOPE_API_KEY') else 'NOT SET'}")
 
 # Import services
+app.logger.info("Importing GDD service...")
 try:
     from backend.gdd_service import (
         upload_and_index_document,
@@ -58,19 +85,72 @@ try:
         query_gdd_documents
     )
     gdd_service_available = True
+    app.logger.info("[OK] GDD service imported successfully")
+    
+    # Check Supabase availability in GDD service
+    try:
+        from backend.storage.gdd_supabase_storage import USE_SUPABASE
+        app.logger.info(f"GDD Supabase storage: {'ENABLED' if USE_SUPABASE else 'DISABLED'}")
+    except Exception as e:
+        app.logger.warning(f"Could not check GDD Supabase status: {e}")
+        
 except ImportError as e:
-    app.logger.warning(f"Could not import GDD service: {e}")
+    app.logger.error(f"[ERROR] Could not import GDD service: {e}")
+    import traceback
+    app.logger.error(f"Import traceback: {traceback.format_exc()}")
     gdd_service_available = False
 
+app.logger.info("Importing Code service...")
 try:
     from backend.code_service import (
         query_codebase,
         list_indexed_files
     )
     code_service_available = True
+    app.logger.info("[OK] Code service imported successfully")
+    
+    # Check Supabase availability in Code service
+    try:
+        from backend.storage.code_supabase_storage import USE_SUPABASE as CODE_USE_SUPABASE
+        app.logger.info(f"Code Supabase storage: {'ENABLED' if CODE_USE_SUPABASE else 'DISABLED'}")
+    except Exception as e:
+        app.logger.warning(f"Could not check Code Supabase status: {e}")
+        
 except ImportError as e:
-    app.logger.warning(f"Could not import Code service: {e}")
+    app.logger.error(f"[ERROR] Could not import Code service: {e}")
+    import traceback
+    app.logger.error(f"Import traceback: {traceback.format_exc()}")
     code_service_available = False
+
+# Log all registered routes on startup
+def log_registered_routes():
+    """Log all registered routes for debugging"""
+    try:
+        with app.app_context():
+            app.logger.info("Registered routes:")
+            for rule in app.url_map.iter_rules():
+                if rule.rule.startswith('/api') or rule.rule in ['/', '/gdd', '/code', '/health']:
+                    methods = [m for m in rule.methods if m not in {'HEAD', 'OPTIONS'}]
+                    app.logger.info(f"  {rule.rule} [{', '.join(methods)}]")
+    except Exception as e:
+        app.logger.warning(f"Could not log routes: {e}")
+
+# Log routes after app is fully configured
+try:
+    log_registered_routes()
+    app.logger.info("=" * 60)
+    app.logger.info("App is ready to serve requests")
+    app.logger.info("=" * 60)
+except Exception as e:
+    app.logger.warning(f"Error logging routes: {e}")
+        
+except ImportError as e:
+    app.logger.error(f"[ERROR] Could not import Code service: {e}")
+    import traceback
+    app.logger.error(f"Import traceback: {traceback.format_exc()}")
+    code_service_available = False
+
+app.logger.info("=" * 60)
 
 @app.route('/')
 def index():
@@ -144,19 +224,36 @@ def gdd_upload():
 @app.route('/api/gdd/documents', methods=['GET'])
 def gdd_documents():
     """List all indexed GDD documents"""
+    app.logger.info("=" * 60)
+    app.logger.info("GET /api/gdd/documents - Starting request")
+    
     try:
         if not gdd_service_available:
+            app.logger.warning("GDD service not available")
             return jsonify({'documents': [], 'options': ['All Documents']})
         
+        app.logger.info("GDD service is available, calling list_documents()...")
         documents = list_documents()
-        options = get_document_options()
+        app.logger.info(f"list_documents() returned {len(documents)} documents")
         
+        if documents:
+            app.logger.info(f"Sample document: {documents[0].get('name', 'N/A')}")
+        
+        app.logger.info("Calling get_document_options()...")
+        options = get_document_options()
+        app.logger.info(f"get_document_options() returned {len(options)} options")
+        
+        app.logger.info(f"Returning response with {len(documents)} documents and {len(options)} options")
+        app.logger.info("=" * 60)
         return jsonify({
             'documents': documents,
             'options': options
         })
     except Exception as e:
-        app.logger.error(f"Error listing GDD documents: {e}")
+        app.logger.error(f"[ERROR] Error listing GDD documents: {e}")
+        import traceback
+        app.logger.error(f"Traceback: {traceback.format_exc()}")
+        app.logger.info("=" * 60)
         return jsonify({'documents': [], 'options': ['All Documents'], 'error': str(e)})
 
 @app.route('/api/code/query', methods=['POST'])
@@ -169,9 +266,7 @@ def code_query():
         data = request.get_json()
         query = data.get('query', '')
         file_filters = data.get('file_filters', [])
-        rerank = data.get('rerank', False)
-        
-        result = query_codebase(query, file_filters=file_filters, rerank=rerank)
+        result = query_codebase(query, file_filters=file_filters)
         return jsonify(result)
     except Exception as e:
         app.logger.error(f"Error in Code query: {e}")
@@ -287,8 +382,14 @@ def debug_supabase():
     
     return jsonify(diagnostics)
 
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint for Render"""
+    return jsonify({'status': 'ok', 'service': 'unified-rag-app'}), 200
+
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('FLASK_ENV') == 'development'
+    app.logger.info(f"Starting Flask development server on port {port}")
     app.run(host='0.0.0.0', port=port, debug=debug)
 

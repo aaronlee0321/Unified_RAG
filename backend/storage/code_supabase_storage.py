@@ -25,6 +25,12 @@ from gdd_rag_backbone.llm_providers import QwenProvider, make_embedding_func
 # Check if Supabase is configured
 USE_SUPABASE = bool(os.getenv('SUPABASE_URL') and os.getenv('SUPABASE_KEY'))
 
+# Log Supabase configuration status (using print for early logging)
+if USE_SUPABASE:
+    print(f"[INFO] Code Supabase configured: URL={os.getenv('SUPABASE_URL', '')[:30]}...")
+else:
+    print("[WARNING] Code Supabase not configured - SUPABASE_URL or SUPABASE_KEY missing")
+
 
 def normalize_path_consistent(path: str) -> Optional[str]:
     """

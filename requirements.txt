@@ -9,8 +9,6 @@ openai>=1.0.0
 tree-sitter>=0.21.3
 pandas>=2.0.0
 markdown>=3.4.0
-rerankers>=0.1.0
-rerankers[transformers]
 
 # GDD RAG dependencies
 dashscope>=1.25.0

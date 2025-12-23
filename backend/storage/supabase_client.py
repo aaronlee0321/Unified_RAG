@@ -41,21 +41,33 @@ def get_supabase_client(use_service_key: bool = False) -> Client:
     Returns:
         Supabase client instance
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     global supabase_anon, supabase_service
     
     if use_service_key:
         # Use service_role key
+        logger.info("Getting Supabase client with service_role key...")
         if supabase_service is None:
             if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+                logger.error("SUPABASE_URL or SUPABASE_SERVICE_KEY not configured")
                 raise ValueError("Supabase URL and service key must be configured. Set SUPABASE_URL and SUPABASE_SERVICE_KEY in .env file.")
+            logger.info(f"Creating service_role client with URL: {SUPABASE_URL[:30]}...")
             supabase_service = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+            logger.info("✅ Service_role client created successfully")
         return supabase_service
     else:
         # Use anon key
+        logger.info("Getting Supabase client with anon key...")
         if supabase_anon is None:
             if not SUPABASE_URL or not SUPABASE_KEY:
+                logger.error("SUPABASE_URL or SUPABASE_KEY not configured")
                 raise ValueError("Supabase URL and key must be configured. Set SUPABASE_URL and SUPABASE_KEY in .env file.")
+            logger.info(f"Creating anon client with URL: {SUPABASE_URL[:30]}...")
+            logger.info(f"Using anon key starting with: {SUPABASE_KEY[:20]}...")
             supabase_anon = create_client(SUPABASE_URL, SUPABASE_KEY)
+            logger.info("✅ Anon client created successfully")
         return supabase_anon
 
 def vector_search_gdd_chunks(
@@ -317,11 +329,26 @@ def get_gdd_documents() -> List[Dict[str, Any]]:
     Returns:
         List of document dictionaries
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
+        logger.info("get_gdd_documents() called")
+        logger.info("Getting Supabase client...")
         client = get_supabase_client()
+        logger.info("Supabase client obtained, querying gdd_documents table...")
+        
         result = client.table('gdd_documents').select('*').order('name').execute()
+        logger.info(f"Query executed, received {len(result.data) if result.data else 0} documents")
+        
+        if result.data and len(result.data) > 0:
+            logger.info(f"Sample document: {result.data[0].get('name', 'N/A')}")
+        
         return result.data if result.data else []
     except Exception as e:
+        import traceback
+        logger.error(f"❌ Error fetching GDD documents: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise Exception(f"Error fetching GDD documents: {e}")
 
 def get_code_files() -> List[Dict[str, Any]]:

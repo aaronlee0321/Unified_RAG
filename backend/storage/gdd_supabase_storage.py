@@ -38,6 +38,12 @@ from gdd_rag_backbone.rag_backend.chunk_qa import (
 # Check if Supabase is configured
 USE_SUPABASE = bool(os.getenv('SUPABASE_URL') and os.getenv('SUPABASE_KEY'))
 
+# Log Supabase configuration status (using print for early logging)
+if USE_SUPABASE:
+    print(f"[INFO] Supabase configured: URL={os.getenv('SUPABASE_URL', '')[:30]}...")
+else:
+    print("[WARNING] Supabase not configured - SUPABASE_URL or SUPABASE_KEY missing")
+
 
 def get_gdd_top_chunks_supabase(
     doc_ids: List[str],
@@ -139,11 +145,24 @@ def list_gdd_documents_supabase() -> List[Dict[str, Any]]:
     Returns:
         List of document metadata dictionaries
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info("list_gdd_documents_supabase() called")
+    logger.info(f"USE_SUPABASE: {USE_SUPABASE}")
+    
     if not USE_SUPABASE:
+        logger.warning("USE_SUPABASE is False, returning empty list")
         return []
     
     try:
+        logger.info("Calling get_gdd_documents() from supabase_client...")
         docs = get_gdd_documents()
+        logger.info(f"get_gdd_documents() returned {len(docs)} documents")
+        
+        if docs:
+            logger.info(f"Sample document from Supabase: {docs[0].get('name', 'N/A')}")
+        
         # Convert to expected format
         result = []
         for doc in docs:
@@ -155,9 +174,13 @@ def list_gdd_documents_supabase() -> List[Dict[str, Any]]:
                 "updated_at": doc.get("updated_at"),
                 "status": "ready" if doc.get("chunks_count", 0) > 0 else "indexed"
             })
+        
+        logger.info(f"✅ Converted {len(result)} documents to expected format")
         return result
     except Exception as e:
-        print(f"Error listing GDD documents from Supabase: {e}")
+        import traceback
+        logger.error(f"❌ Error listing GDD documents from Supabase: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return []
 
 
