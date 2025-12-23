@@ -8,11 +8,10 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
-# Add parent directory to path for imports
+# Add project root to path for imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-PARENT_ROOT = PROJECT_ROOT.parent
-if str(PARENT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PARENT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.storage.supabase_client import (
     vector_search_code_chunks,
@@ -20,6 +19,7 @@ from backend.storage.supabase_client import (
     insert_code_file,
     insert_code_chunks,
 )
+# Import from local gdd_rag_backbone (now included in unified_rag_app)
 from gdd_rag_backbone.llm_providers import QwenProvider, make_embedding_func
 
 # Check if Supabase is configured

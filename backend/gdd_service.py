@@ -9,22 +9,10 @@ import asyncio
 import shutil
 from pathlib import Path
 
-# Add parent directory to path for imports
+# Add project root to path for imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PARENT_ROOT = PROJECT_ROOT.parent
-if str(PARENT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PARENT_ROOT))
-
-# Import GDD RAG functions from gdd_rag_backbone
-from gdd_rag_backbone.config import DEFAULT_DOCS_DIR, DEFAULT_WORKING_DIR
-from gdd_rag_backbone.llm_providers import (
-    QwenProvider,
-    make_embedding_func,
-)
-from gdd_rag_backbone.rag_backend.markdown_chunk_qa import (
-    get_markdown_top_chunks,
-    list_markdown_indexed_docs,
-)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # Try to import Supabase storage (optional)
 try:
@@ -38,14 +26,28 @@ try:
 except ImportError:
     SUPABASE_AVAILABLE = False
     print("Warning: Supabase storage not available, using local file storage")
+
+# Import gdd_rag_backbone (now included in unified_rag_app)
+from gdd_rag_backbone.config import DEFAULT_DOCS_DIR, DEFAULT_WORKING_DIR
+from gdd_rag_backbone.llm_providers import (
+    QwenProvider,
+    make_embedding_func,
+)
+from gdd_rag_backbone.rag_backend.markdown_chunk_qa import (
+    get_markdown_top_chunks,
+    list_markdown_indexed_docs,
+)
 from gdd_rag_backbone.scripts.chunk_markdown_files import (
     generate_doc_id as generate_md_doc_id,
     save_chunks as save_md_chunks,
 )
 from gdd_rag_backbone.scripts.index_markdown_chunks import index_chunks_for_doc
 from gdd_rag_backbone.markdown_chunking import MarkdownChunker
+GDD_RAG_BACKBONE_AVAILABLE = True
 
-# Ensure directories exist
+# Ensure directories exist (relative to unified_rag_app)
+DEFAULT_DOCS_DIR = PROJECT_ROOT / "docs"
+DEFAULT_WORKING_DIR = PROJECT_ROOT / "rag_storage"
 DEFAULT_DOCS_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_WORKING_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -159,22 +161,17 @@ def upload_and_index_document(file_path: Path):
         target_path = DEFAULT_DOCS_DIR / file_path.name
         shutil.copy(str(file_path), str(target_path))
         
-        # 2. Convert PDF → Markdown using PDFtoMarkdown/pdf_to_markdown.py
-        pdf_md_dir = PARENT_ROOT / "PDFtoMarkdown" / "markdown"
+        # 2. Convert PDF → Markdown (for now, skip PDF conversion - documents should be pre-converted)
+        # TODO: Add PDF to Markdown conversion capability if needed
+        # For now, assume documents are already in markdown format or skip this step
+        pdf_md_dir = PROJECT_ROOT / "markdown"
         pdf_md_dir.mkdir(parents=True, exist_ok=True)
         
-        # Make PDFtoMarkdown module importable
-        pdf_md_module_path = PARENT_ROOT / "PDFtoMarkdown"
-        if str(pdf_md_module_path) not in sys.path:
-            sys.path.insert(0, str(pdf_md_module_path))
-        
-        try:
-            import pdf_to_markdown as pdf2md  # type: ignore
-        except ImportError as e:
-            return {
-                'status': 'error',
-                'message': f'Error: Could not import pdf_to_markdown helper. Details: {e}'
-            }
+        # Skip PDF conversion for now - return error if PDF upload is attempted
+        return {
+            'status': 'error',
+            'message': 'PDF upload is not yet supported in the unified app. Please use pre-converted markdown files or implement PDF conversion.'
+        }
         
         # Use the existing CLI helper's convert_all function
         md_paths = pdf2md.convert_all(
@@ -202,7 +199,7 @@ def upload_and_index_document(file_path: Path):
             filename=str(md_path),
         )
         
-        md_output_dir = PARENT_ROOT / "rag_storage_md" / doc_id
+        md_output_dir = PROJECT_ROOT / "rag_storage_md" / doc_id
         save_md_chunks(chunks, doc_id, md_output_dir)
         
         # 4. Index chunks - use Supabase if available, otherwise local storage
@@ -278,7 +275,11 @@ def list_documents():
                 print(f"Warning: Failed to load from Supabase, trying local storage: {e}")
                 traceback.print_exc()
         
-        # Fallback to local storage
+        # Fallback to local storage (only if gdd_rag_backbone is available)
+        if not GDD_RAG_BACKBONE_AVAILABLE:
+            print("Warning: Cannot fallback to local storage - gdd_rag_backbone not available")
+            return []
+        
         print("Attempting to load from local storage...")
         markdown_docs = list_markdown_indexed_docs()
         
@@ -321,12 +322,18 @@ def get_document_options():
                 docs = list_gdd_documents_supabase()
                 indexed_docs = [doc for doc in docs if doc.get("chunks_count", 0) > 0]
             except Exception as e:
-                print(f"Warning: Failed to load from Supabase, trying local storage: {e}")
+                print(f"Warning: Failed to load from Supabase: {e}")
+                if GDD_RAG_BACKBONE_AVAILABLE:
+                    markdown_docs = list_markdown_indexed_docs()
+                    indexed_docs = [doc for doc in markdown_docs if doc.get("chunks_count", 0) > 0]
+                else:
+                    indexed_docs = []
+        else:
+            if GDD_RAG_BACKBONE_AVAILABLE:
                 markdown_docs = list_markdown_indexed_docs()
                 indexed_docs = [doc for doc in markdown_docs if doc.get("chunks_count", 0) > 0]
-        else:
-            markdown_docs = list_markdown_indexed_docs()
-            indexed_docs = [doc for doc in markdown_docs if doc.get("chunks_count", 0) > 0]
+            else:
+                indexed_docs = []
         
         options = ["All Documents"]
         for doc in sorted(indexed_docs, key=lambda x: x.get("doc_id", "")):

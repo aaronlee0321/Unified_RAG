@@ -12,41 +12,36 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 from openai import OpenAI
 
-# Add parent directory to path for imports
+# Add project root to path for imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PARENT_ROOT = PROJECT_ROOT.parent
-if str(PARENT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PARENT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# Import prompts
-CODE_QA_PROMPTS_PATH = PARENT_ROOT / "codebase_RAG" / "code_qa" / "prompts.py"
-if CODE_QA_PROMPTS_PATH.exists():
-    # Add the prompts directory to path
-    prompts_dir = str(CODE_QA_PROMPTS_PATH.parent)
-    if prompts_dir not in sys.path:
-        sys.path.insert(0, prompts_dir)
+# Import prompts (now included in unified_rag_app)
+try:
+    from backend.code_qa_prompts import (
+        HYDE_SYSTEM_PROMPT,
+        HYDE_V2_SYSTEM_PROMPT,
+        CHAT_SYSTEM_PROMPT
+    )
+except ImportError:
+    # Fallback: try importing as prompts module
     try:
-        import prompts
+        import code_qa_prompts as prompts
+        HYDE_SYSTEM_PROMPT = prompts.HYDE_SYSTEM_PROMPT
         HYDE_V2_SYSTEM_PROMPT = prompts.HYDE_V2_SYSTEM_PROMPT
         CHAT_SYSTEM_PROMPT = prompts.CHAT_SYSTEM_PROMPT
     except ImportError:
-        # Fallback prompts
+        # Fallback prompts if file not found
+        HYDE_SYSTEM_PROMPT = '''You are a code-search query rewriter for a code RAG system.
+Your ONLY job is to transform a natural language query into a better search query over the existing codebase.'''
+        
         HYDE_V2_SYSTEM_PROMPT = '''You are a code-search query refiner for a code RAG system.
 Your task is to enhance the original query: {query}
 using ONLY the information present in the provided context: {temp_context}
 Rewrite the query to include precise method names, class names, file paths that appear in the context.'''
         
         CHAT_SYSTEM_PROMPT = '''You are a STRICTLY codebase-aware assistant.
-You MUST answer ONLY using the following code context: {context}
-Use ONLY information explicitly present in the context above.'''
-else:
-    # Fallback prompts if file not found
-    HYDE_V2_SYSTEM_PROMPT = '''You are a code-search query refiner for a code RAG system.
-Your task is to enhance the original query: {query}
-using ONLY the information present in the provided context: {temp_context}
-Rewrite the query to include precise method names, class names, file paths that appear in the context.'''
-    
-    CHAT_SYSTEM_PROMPT = '''You are a STRICTLY codebase-aware assistant.
 You MUST answer ONLY using the following code context: {context}
 Use ONLY information explicitly present in the context above.'''
 
@@ -81,6 +76,7 @@ except ImportError:
             return None
 
 # Import LLM providers
+# Import from local gdd_rag_backbone (now included in unified_rag_app)
 from gdd_rag_backbone.llm_providers import QwenProvider, make_embedding_func
 
 # Initialize OpenAI client for HYDE and answer generation
@@ -494,7 +490,7 @@ def list_indexed_files():
                 print(f"Warning: Failed to load from Supabase, trying fallback: {e}")
         
         # Fallback: Load from indexed_cs_files.json (original code_qa format)
-        indexed_cs_json = PARENT_ROOT / "codebase_RAG" / "code_qa" / "indexed_cs_files.json"
+        indexed_cs_json = PROJECT_ROOT / "data" / "indexed_cs_files.json"
         if indexed_cs_json.exists():
             try:
                 with open(indexed_cs_json, 'r', encoding='utf-8') as f:

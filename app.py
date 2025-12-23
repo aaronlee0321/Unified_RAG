@@ -13,11 +13,10 @@ import logging
 # Load environment variables
 load_dotenv()
 
-# Add parent directory to path for imports
+# Add project root to path for imports
 PROJECT_ROOT = Path(__file__).resolve().parent
-PARENT_ROOT = PROJECT_ROOT.parent
-if str(PARENT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PARENT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # Configuration
 CONFIG = {
