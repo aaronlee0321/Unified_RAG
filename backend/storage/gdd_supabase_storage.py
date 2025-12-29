@@ -7,7 +7,7 @@ import os
 import sys
 import re
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 import json
 
 # Add project root to path for imports
