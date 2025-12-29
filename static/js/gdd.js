@@ -514,6 +514,12 @@ document.addEventListener('DOMContentLoaded', function() {
     function formatMessage(text) {
         if (!text) return '';
         
+        // Check if text contains HTML elements (iframe, embed, etc.) - don't escape if it does
+        if (text.includes('<iframe') || text.includes('<embed') || text.includes('<object')) {
+            // Contains HTML embeds - return as-is to allow rendering
+            return text;
+        }
+        
         // Escape HTML first
         let escaped = text
             .replace(/&/g, '&amp;')

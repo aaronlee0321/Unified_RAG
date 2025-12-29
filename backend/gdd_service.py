@@ -26,7 +26,7 @@ try:
     SUPABASE_AVAILABLE = USE_SUPABASE
 except ImportError:
     SUPABASE_AVAILABLE = False
-    print("Warning: Supabase storage not available, using local file storage")
+    print("ERROR: Supabase storage not available. This app requires Supabase to function.")
 
 # Import gdd_rag_backbone (now included in unified_rag_app)
 try:
@@ -44,11 +44,9 @@ try:
     from gdd_rag_backbone.markdown_chunking import MarkdownChunker
     GDD_RAG_BACKBONE_AVAILABLE = True
     
-    # Ensure directories exist (relative to unified_rag_app)
+    # Define directory paths (but don't create them - not needed for Render)
     DEFAULT_DOCS_DIR = PROJECT_ROOT / "docs"
     DEFAULT_WORKING_DIR = PROJECT_ROOT / "rag_storage"
-    DEFAULT_DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    DEFAULT_WORKING_DIR.mkdir(parents=True, exist_ok=True)
 except ImportError as e:
     import sys
     import traceback
@@ -141,6 +139,8 @@ def extract_full_document(doc_id: str) -> str:
     """
     Extract full document content from Supabase (no local file dependency).
     
+    If markdown_content is not stored, reconstructs document from chunks.
+    
     Args:
         doc_id: Document ID
     
@@ -151,13 +151,65 @@ def extract_full_document(doc_id: str) -> str:
         return f"Error: Supabase is not available. Cannot extract document '{doc_id}'."
     
     try:
-        from backend.storage.supabase_client import get_gdd_document_markdown
-        content = get_gdd_document_markdown(doc_id)
+        from backend.storage.supabase_client import get_gdd_document_markdown, get_gdd_document_pdf_url, get_supabase_client
         
+        # PRIORITY 1: Check if PDF exists in Supabase Storage - if yes, return PDF embed
+        pdf_url = get_gdd_document_pdf_url(doc_id)
+        if pdf_url:
+            return f'**PDF Document: {doc_id}**\n\n[📄 View PDF]({pdf_url})\n\n<iframe src="{pdf_url}" width="100%" height="800px" style="border: 1px solid #ccc;"></iframe>'
+        
+        # PRIORITY 2: Try to get markdown content from gdd_documents table
+        content = get_gdd_document_markdown(doc_id)
         if content:
             return content
-        else:
-            return f"Error: Document '{doc_id}' not found in Supabase or has no markdown content stored."
+        
+        # PRIORITY 3 (Fallback): Reconstruct document from chunks if markdown_content not stored
+        try:
+            client = get_supabase_client()
+            
+            # First check if document exists
+            doc_result = client.table('gdd_documents').select('doc_id').eq('doc_id', doc_id).limit(1).execute()
+            if not doc_result.data:
+                return f"Error: Document '{doc_id}' not found in Supabase."
+            
+            # Get all chunks for this document, ordered by chunk_id
+            result = client.table('gdd_chunks').select('content, chunk_id, section_path, metadata').eq('doc_id', doc_id).order('chunk_id').execute()
+            
+            if not result.data:
+                return f"Error: Document '{doc_id}' exists in Supabase but has no chunks. Please re-index the document."
+            
+            # Reconstruct document from chunks
+            # Group by section and combine content
+            sections = {}
+            for chunk in result.data:
+                section_path = chunk.get('section_path', 'Unknown')
+                content = chunk.get('content', '')
+                
+                if section_path not in sections:
+                    sections[section_path] = []
+                sections[section_path].append(content)
+            
+            # Build document
+            doc_parts = []
+            for section_path, contents in sorted(sections.items()):
+                if section_path and section_path != 'Unknown':
+                    doc_parts.append(f"## {section_path}\n")
+                doc_parts.append('\n\n'.join(contents))
+                doc_parts.append('\n\n')
+            
+            reconstructed = ''.join(doc_parts).strip()
+            
+            if reconstructed:
+                return reconstructed
+            else:
+                return f"Error: Document '{doc_id}' found but has no content in chunks."
+                
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error reconstructing document from chunks: {e}")
+            return f"Error: Document '{doc_id}' not found in Supabase or has no markdown content stored. Reconstruction from chunks also failed: {str(e)}"
+            
     except Exception as e:
         return f"Error reading document '{doc_id}' from Supabase: {str(e)}"
 

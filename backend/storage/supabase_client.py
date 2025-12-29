@@ -466,6 +466,36 @@ def get_gdd_document_markdown(doc_id: str) -> Optional[str]:
         logger.error(f"Error fetching markdown content for {doc_id}: {e}")
         return None
 
+
+def get_gdd_document_pdf_url(doc_id: str) -> Optional[str]:
+    """
+    Get public URL for PDF from Supabase Storage.
+    
+    Args:
+        doc_id: Document ID
+    
+    Returns:
+        Public URL to PDF, or None if not found
+    """
+    try:
+        client = get_supabase_client()
+        
+        # Check if PDF exists in storage bucket 'gdd_pdfs'
+        bucket_name = 'gdd_pdfs'
+        file_path = f"{doc_id}.pdf"
+        
+        # Get public URL
+        url = client.storage.from_(bucket_name).get_public_url(file_path)
+        
+        # Verify file exists by attempting to get it
+        # If file doesn't exist, this will return None
+        return url if url else None
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"PDF not found in storage for {doc_id}: {e}")
+        return None
+
 def get_code_files() -> List[Dict[str, Any]]:
     """
     Get all code files.
