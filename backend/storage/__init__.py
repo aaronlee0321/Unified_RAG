@@ -1,2 +1,0 @@
-# Storage modules package
-
