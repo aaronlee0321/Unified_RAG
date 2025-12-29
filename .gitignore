@@ -31,3 +31,25 @@ Thumbs.db
 .vercel
 .railway
 
+# GDD Data - Don't commit indexed documents, chunks, or large files
+gdd_data/
+gdd_data_v2/
+rag_storage/
+rag_storage_md/
+rag_storage_md_indexed/
+output/
+docs/
+markdown/
+PDFtoMarkdown/markdown/
+PDFtoMarkdown/images/
+
+# Large files and assets
+Assets/
+*.bundle
+*.dll
+*.so
+*.dylib
+
+# Indexed chunks and embeddings (but keep config JSON files)
+gdd_data/**/*.json
+chunks/**/*.json

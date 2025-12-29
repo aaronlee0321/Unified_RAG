@@ -227,15 +227,16 @@ def vector_search_code_chunks(
         logger.error(f"[Supabase Code Search] Error: {e}")
         raise Exception(f"Error in Code vector search: {e}")
 
-def insert_gdd_document(doc_id: str, name: str, file_path: Optional[str] = None, file_size: Optional[int] = None) -> Dict[str, Any]:
+def insert_gdd_document(doc_id: str, name: str, file_path: Optional[str] = None, file_size: Optional[int] = None, markdown_content: Optional[str] = None) -> Dict[str, Any]:
     """
     Insert or update a GDD document.
     
     Args:
         doc_id: Unique document ID
         name: Document name
-        file_path: Optional file path
+        file_path: Optional file path (for reference, not used for reading)
         file_size: Optional file size in bytes
+        markdown_content: Optional full markdown content (stored in Supabase)
     
     Returns:
         Inserted/updated document data
@@ -243,12 +244,18 @@ def insert_gdd_document(doc_id: str, name: str, file_path: Optional[str] = None,
     try:
         client = get_supabase_client(use_service_key=True)
         
-        result = client.table('gdd_documents').upsert({
+        doc_data = {
             'doc_id': doc_id,
             'name': name,
             'file_path': file_path,
             'file_size': file_size
-        }, on_conflict='doc_id').execute()
+        }
+        
+        # Add markdown_content if provided
+        if markdown_content is not None:
+            doc_data['markdown_content'] = markdown_content
+        
+        result = client.table('gdd_documents').upsert(doc_data, on_conflict='doc_id').execute()
         
         return result.data[0] if result.data else {}
     except Exception as e:
@@ -434,6 +441,30 @@ def get_gdd_documents() -> List[Dict[str, Any]]:
         logger.error(f"❌ Error fetching GDD documents: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise Exception(f"Error fetching GDD documents: {e}")
+
+
+def get_gdd_document_markdown(doc_id: str) -> Optional[str]:
+    """
+    Get full markdown content for a GDD document from Supabase.
+    
+    Args:
+        doc_id: Document ID
+    
+    Returns:
+        Markdown content as string, or None if not found
+    """
+    try:
+        client = get_supabase_client()
+        result = client.table('gdd_documents').select('markdown_content').eq('doc_id', doc_id).limit(1).execute()
+        
+        if result.data and len(result.data) > 0:
+            return result.data[0].get('markdown_content')
+        return None
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error fetching markdown content for {doc_id}: {e}")
+        return None
 
 def get_code_files() -> List[Dict[str, Any]]:
     """

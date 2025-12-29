@@ -8,7 +8,7 @@ import sys
 import asyncio
 import shutil
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # Add project root to path for imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -84,107 +84,62 @@ def _generate_doc_id_from_filename(filename: Path) -> str:
     return doc_id.strip("_")
 
 
-def _find_markdown_file_from_doc_id(doc_id: str) -> Path:
+def _find_markdown_file_from_doc_id(doc_id: str) -> Optional[Path]:
     """
-    Find markdown file from doc_id by scanning markdown directory.
+    DEPRECATED: No longer uses local files. Always returns None.
+    Markdown content is now stored in Supabase.
     
     Args:
         doc_id: Document ID
     
     Returns:
-        Path to markdown file, or None if not found
+        None (local files are no longer used)
     """
-    if not MARKDOWN_DIR.exists():
-        return None
-    
-    # Try exact match first
-    for md_file in MARKDOWN_DIR.glob("*.md"):
-        generated_id = _generate_doc_id_from_filename(md_file)
-        if generated_id == doc_id:
-            return md_file
-    
-    # Try fuzzy match (normalize both)
-    doc_id_normalized = doc_id.lower().replace("_", "").replace("-", "")
-    for md_file in MARKDOWN_DIR.glob("*.md"):
-        generated_id = _generate_doc_id_from_filename(md_file)
-        generated_id_normalized = generated_id.lower().replace("_", "").replace("-", "")
-        if generated_id_normalized == doc_id_normalized:
-            return md_file
-    
+    # Local files are no longer used - all content is in Supabase
     return None
 
 
 def list_documents_from_markdown() -> List[Dict[str, Any]]:
     """
-    List all documents by scanning markdown directory.
-    Uses Supabase doc_ids as source of truth - matches markdown files to Supabase doc_ids.
+    List all documents from Supabase (no local file dependency).
+    Uses Supabase as the only source of truth.
     
     Returns:
         List of document metadata dictionaries
     """
-    if not MARKDOWN_DIR.exists():
+    # Get documents directly from Supabase (no local file scanning)
+    if not SUPABASE_AVAILABLE:
         return []
     
-    # Get documents from Supabase (source of truth for doc_ids)
-    supabase_docs = {}
-    supabase_docs_by_name = {}  # Map by filename for matching
-    if SUPABASE_AVAILABLE:
-        try:
-            supabase_docs_list = list_gdd_documents_supabase()
-            for doc in supabase_docs_list:
-                doc_id = doc.get("doc_id", "")
-                supabase_docs[doc_id] = doc
-                # Also index by name for matching
-                name = doc.get("name", "")
-                if name:
-                    supabase_docs_by_name[name.lower()] = doc
-        except Exception as e:
-            print(f"Warning: Could not load documents from Supabase: {e}")
-    
-    documents = []
-    for md_file in sorted(MARKDOWN_DIR.glob("*.md")):
-        generated_doc_id = _generate_doc_id_from_filename(md_file)
-        file_stem = md_file.stem
+    try:
+        supabase_docs_list = list_gdd_documents_supabase()
+        documents = []
         
-        # Try to find matching Supabase doc_id
-        # Strategy 1: Exact match with generated doc_id
-        supabase_doc = supabase_docs.get(generated_doc_id)
+        for doc in supabase_docs_list:
+            doc_id = doc.get("doc_id", "")
+            chunks_count = doc.get("chunks_count", 0)
+            name = doc.get("name", doc_id)
+            file_path = doc.get("file_path")  # May be None, that's OK
+            
+            documents.append({
+                'doc_id': doc_id,
+                'name': name,
+                'file_path': file_path,  # May be None - stored for reference only
+                'chunks_count': chunks_count,
+                'status': 'ready' if chunks_count > 0 else 'indexed'
+            })
         
-        # Strategy 2: Match by filename (stem)
-        if not supabase_doc:
-            supabase_doc = supabase_docs_by_name.get(file_stem.lower())
-        
-        # Strategy 3: Fuzzy match - normalize and compare
-        if not supabase_doc:
-            generated_normalized = generated_doc_id.lower().replace("_", "").replace("-", "")
-            for supabase_doc_id, supabase_doc_data in supabase_docs.items():
-                supabase_normalized = supabase_doc_id.lower().replace("_", "").replace("-", "")
-                if generated_normalized == supabase_normalized:
-                    supabase_doc = supabase_doc_data
-                    break
-        
-        # Use Supabase doc_id if found, otherwise use generated
-        if supabase_doc:
-            doc_id = supabase_doc.get("doc_id", generated_doc_id)
-            chunks_count = supabase_doc.get("chunks_count", 0)
-        else:
-            doc_id = generated_doc_id
-            chunks_count = 0
-        
-        documents.append({
-            'doc_id': doc_id,  # Use Supabase doc_id if available
-            'name': file_stem,
-            'file_path': str(md_file),
-            'chunks_count': chunks_count,
-            'status': 'ready' if chunks_count > 0 else 'indexed'
-        })
-    
-    return documents
+        return documents
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Warning: Could not load documents from Supabase: {e}")
+        return []
 
 
 def extract_full_document(doc_id: str) -> str:
     """
-    Extract full document content from markdown file.
+    Extract full document content from Supabase (no local file dependency).
     
     Args:
         doc_id: Document ID
@@ -192,16 +147,19 @@ def extract_full_document(doc_id: str) -> str:
     Returns:
         Full document content as string, or error message if not found
     """
-    md_file = _find_markdown_file_from_doc_id(doc_id)
-    
-    if not md_file or not md_file.exists():
-        return f"Error: Document '{doc_id}' not found in markdown directory."
+    if not SUPABASE_AVAILABLE:
+        return f"Error: Supabase is not available. Cannot extract document '{doc_id}'."
     
     try:
-        content = md_file.read_text(encoding='utf-8')
-        return content
+        from backend.storage.supabase_client import get_gdd_document_markdown
+        content = get_gdd_document_markdown(doc_id)
+        
+        if content:
+            return content
+        else:
+            return f"Error: Document '{doc_id}' not found in Supabase or has no markdown content stored."
     except Exception as e:
-        return f"Error reading document '{doc_id}': {str(e)}"
+        return f"Error reading document '{doc_id}' from Supabase: {str(e)}"
 
 
 def _detect_question_language(text: str) -> str:
@@ -418,12 +376,11 @@ def list_documents():
     logger.info("=" * 60)
     logger.info("list_documents() called")
     logger.info(f"SUPABASE_AVAILABLE: {SUPABASE_AVAILABLE}")
-    logger.info(f"MARKDOWN_DIR: {MARKDOWN_DIR}")
     
     try:
-        # Use markdown directory as source of truth
+        # Get documents from Supabase (no local file dependency)
         documents = list_documents_from_markdown()
-        logger.info(f"✅ Loaded {len(documents)} documents from markdown directory")
+        logger.info(f"✅ Loaded {len(documents)} documents from Supabase")
         logger.info("=" * 60)
         return documents
     except Exception as e:

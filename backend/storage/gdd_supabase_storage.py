@@ -609,7 +609,8 @@ def list_gdd_documents_supabase() -> List[Dict[str, Any]]:
 def index_gdd_chunks_to_supabase(
     doc_id: str,
     chunks: List[Dict],
-    provider
+    provider,
+    markdown_content: Optional[str] = None
 ) -> bool:
     """
     Index GDD chunks to Supabase with embeddings.
@@ -658,10 +659,12 @@ def index_gdd_chunks_to_supabase(
         file_path = chunks[0].get("file_path", "") if chunks else ""
         doc_name = Path(file_path).name if file_path else doc_id
         
+        # Store markdown content in Supabase (passed as parameter or None)
         insert_gdd_document(
             doc_id=doc_id,
             name=doc_name,
-            file_path=file_path
+            file_path=file_path,
+            markdown_content=markdown_content  # Store markdown content in Supabase
         )
         
         # Insert chunks
