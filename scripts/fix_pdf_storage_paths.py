@@ -1,17 +1,15 @@
 """
-Fix pdf_storage_path in database to match actual filenames in Supabase Storage.
+Fix pdf_storage_path in database to match actual PDF filenames in Supabase Storage.
 
 This script:
-1. Lists all PDFs in gdd_pdfs bucket
-2. For each document, finds the best matching PDF file
-3. Updates pdf_storage_path in database to match the actual filename
+1. Lists all PDFs in storage
+2. For each document with a mismatched pdf_storage_path, finds the actual PDF file
+3. Updates pdf_storage_path in the database to match the actual filename
 """
 
 import sys
 from pathlib import Path
-import re
 
-# Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -25,167 +23,165 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def normalize_for_matching(text):
-    """Normalize text for fuzzy matching."""
-    if not text:
+def normalize_filename(filename: str) -> str:
+    """Normalize filename for comparison (remove spaces, underscores, dashes, case-insensitive)"""
+    if not filename:
         return ""
-    # Remove .pdf extension
-    text = text.replace('.pdf', '')
-    # Replace variations: `_-_` -> `_`, `-` -> `_`, multiple underscores -> single
-    text = text.replace('_-_', '_').replace('-', '_')
-    text = re.sub(r'_+', '_', text)  # Multiple underscores to single
-    text = text.strip('_').lower()
-    return text
+    normalized = filename.lower().replace('_', '').replace('-', '').replace(' ', '').replace('.pdf', '')
+    # Remove special characters
+    normalized = normalized.replace('(', '').replace(')', '').replace('&', '').replace(',', '')
+    # Normalize Vietnamese characters to ASCII equivalents for matching
+    # This handles cases where storage has "He_Thong" but database has "Hệ_Thống"
+    vietnamese_to_ascii = {
+        'ệ': 'e', 'ế': 'e', 'ề': 'e', 'ể': 'e', 'ễ': 'e', 'ệ': 'e',
+        'ư': 'u', 'ứ': 'u', 'ừ': 'u', 'ử': 'u', 'ữ': 'u', 'ự': 'u',
+        'ơ': 'o', 'ớ': 'o', 'ờ': 'o', 'ở': 'o', 'ỡ': 'o', 'ợ': 'o',
+        'ă': 'a', 'ắ': 'a', 'ằ': 'a', 'ẳ': 'a', 'ẵ': 'a', 'ặ': 'a',
+        'â': 'a', 'ấ': 'a', 'ầ': 'a', 'ẩ': 'a', 'ẫ': 'a', 'ậ': 'a',
+        'ô': 'o', 'ố': 'o', 'ồ': 'o', 'ổ': 'o', 'ỗ': 'o', 'ộ': 'o',
+        'ê': 'e', 'ế': 'e', 'ề': 'e', 'ể': 'e', 'ễ': 'e', 'ệ': 'e',
+        'đ': 'd', 'Đ': 'd',
+        'á': 'a', 'à': 'a', 'ả': 'a', 'ã': 'a', 'ạ': 'a',
+        'í': 'i', 'ì': 'i', 'ỉ': 'i', 'ĩ': 'i', 'ị': 'i',
+        'ý': 'y', 'ỳ': 'y', 'ỷ': 'y', 'ỹ': 'y', 'ỵ': 'y',
+        'ú': 'u', 'ù': 'u', 'ủ': 'u', 'ũ': 'u', 'ụ': 'u',
+        'ó': 'o', 'ò': 'o', 'ỏ': 'o', 'õ': 'o', 'ọ': 'o',
+    }
+    for viet, ascii_char in vietnamese_to_ascii.items():
+        normalized = normalized.replace(viet, ascii_char)
+    return normalized
 
 
-def find_best_match(doc_id, stored_path, files_in_storage):
-    """Find the best matching PDF file for a document."""
-    file_names = [f.get('name', '') for f in files_in_storage if f.get('name', '').endswith('.pdf')]
+def find_matching_pdf(doc_id: str, stored_path: str, storage_files: list) -> str:
+    """Find matching PDF file in storage for a document."""
+    # Normalize doc_id for matching
+    doc_id_normalized = normalize_filename(doc_id)
+    stored_normalized = normalize_filename(stored_path) if stored_path else ""
     
     # Strategy 1: Exact match with stored path
-    if stored_path and stored_path in file_names:
-        return stored_path, "EXACT (stored path)"
+    if stored_path and stored_path in storage_files:
+        return stored_path
     
-    # Strategy 2: Exact match with doc_id.pdf
+    # Strategy 2: Try doc_id.pdf
     doc_id_filename = f"{doc_id}.pdf"
-    if doc_id_filename in file_names:
-        return doc_id_filename, "EXACT (doc_id)"
+    if doc_id_filename in storage_files:
+        return doc_id_filename
     
-    # Strategy 3: Normalized matching
-    stored_normalized = normalize_for_matching(stored_path) if stored_path else ""
-    doc_id_normalized = normalize_for_matching(doc_id)
-    
-    best_match = None
-    best_score = 0
-    
-    for file_name in file_names:
-        file_normalized = normalize_for_matching(file_name)
+    # Strategy 3: Fuzzy matching - normalize and compare
+    for file_name in storage_files:
+        file_normalized = normalize_filename(file_name)
         
-        # Check if stored path matches
+        # Check if stored filename matches
         if stored_normalized and stored_normalized == file_normalized:
-            return file_name, "FUZZY (stored path normalized)"
+            return file_name
         
         # Check if doc_id matches file name
-        if doc_id_normalized:
-            # Calculate similarity (length of common normalized string)
-            if doc_id_normalized == file_normalized:
-                return file_name, "FUZZY (doc_id normalized exact)"
-            
-            # Check if one contains the other
-            if doc_id_normalized in file_normalized or file_normalized in doc_id_normalized:
-                common_length = len(set(doc_id_normalized) & set(file_normalized))
-                if common_length > best_score:
-                    best_score = common_length
-                    best_match = file_name
+        if doc_id_normalized and (doc_id_normalized in file_normalized or file_normalized in doc_id_normalized):
+            # Prefer closer matches (longer common substring)
+            return file_name
     
-    if best_match:
-        return best_match, "FUZZY (best match)"
-    
-    return None, None
+    return None
 
 
-def fix_pdf_storage_paths():
-    """Fix pdf_storage_path in database to match actual filenames."""
-    
+def fix_pdf_storage_paths(dry_run: bool = False):
+    """Fix pdf_storage_path for all documents."""
     try:
-        client = get_supabase_client(use_service_key=True)
+        client = get_supabase_client()
+        storage_client = get_supabase_client(use_service_key=True)
     except Exception as e:
         logger.error(f"Failed to get Supabase client: {e}")
         return
     
-    logger.info("="*80)
-    logger.info("FIXING PDF STORAGE PATHS")
-    logger.info("="*80)
+    logger.info("=" * 80)
+    logger.info("FIX PDF STORAGE PATHS")
+    logger.info("=" * 80)
     
-    # 1. Get all documents
-    logger.info("\n📄 Fetching all documents from database...")
+    # 1. Get all PDFs in storage
+    logger.info("\n📦 Fetching PDFs from storage...")
     try:
-        result = client.table('gdd_documents').select('doc_id, name, pdf_storage_path').execute()
-        documents = result.data or []
-        logger.info(f"✓ Found {len(documents)} documents")
+        files = storage_client.storage.from_('gdd_pdfs').list()
+        storage_files = [f.get('name', '') for f in files] if files else []
+        logger.info(f"✓ Found {len(storage_files)} PDF file(s) in storage")
+    except Exception as e:
+        logger.error(f"❌ Error listing storage files: {e}")
+        return
+    
+    # 2. Get all documents with pdf_storage_path
+    logger.info("\n📄 Fetching documents from database...")
+    try:
+        docs_result = client.table('gdd_documents').select('doc_id, name, pdf_storage_path').execute()
+        documents = docs_result.data if docs_result.data else []
+        logger.info(f"✓ Found {len(documents)} document(s)")
     except Exception as e:
         logger.error(f"❌ Error fetching documents: {e}")
         return
     
-    # 2. List all PDFs in storage
-    logger.info("\n📦 Listing all PDFs in gdd_pdfs bucket...")
-    try:
-        files_in_storage = client.storage.from_('gdd_pdfs').list()
-        logger.info(f"✓ Found {len(files_in_storage)} PDF files in storage")
-    except Exception as e:
-        logger.error(f"❌ Error listing files from storage: {e}")
-        return
+    # 3. Find and fix mismatches
+    logger.info("\n🔍 Finding mismatches and fixing...")
+    logger.info("=" * 80)
     
-    # 3. Match and update
-    logger.info("\n🔗 Matching and updating pdf_storage_path...")
-    logger.info("="*80)
-    
-    updated_count = 0
-    no_match_count = 0
+    fixed_count = 0
+    not_found_count = 0
     already_correct_count = 0
     
     for doc in documents:
         doc_id = doc.get('doc_id', '')
         stored_path = doc.get('pdf_storage_path', '')
+        doc_name = doc.get('name', '')
         
-        # Find best match
-        matched_file, match_type = find_best_match(doc_id, stored_path, files_in_storage)
-        
-        if not matched_file:
-            logger.warning(f"❌ No match found for: {doc_id}")
-            logger.warning(f"   Stored path: {stored_path}")
-            no_match_count += 1
+        if not stored_path:
             continue
         
-        # Check if already correct
-        if stored_path == matched_file:
-            logger.info(f"✓ Already correct: {doc_id} → {matched_file}")
+        # Check if stored path matches actual file
+        if stored_path in storage_files:
             already_correct_count += 1
             continue
         
-        # Update database
-        logger.info(f"\n📝 Updating: {doc_id}")
-        logger.info(f"   Old path: {stored_path or '(none)'}")
-        logger.info(f"   New path: {matched_file} ({match_type})")
+        # Try to find matching PDF
+        matched_file = find_matching_pdf(doc_id, stored_path, storage_files)
         
-        try:
-            client.table('gdd_documents').update({
-                'pdf_storage_path': matched_file
-            }).eq('doc_id', doc_id).execute()
+        if matched_file:
+            logger.info(f"\n📝 {doc_id}")
+            logger.info(f"   Current: {stored_path}")
+            logger.info(f"   Found:   {matched_file}")
             
-            logger.info(f"   ✅ Updated successfully")
-            updated_count += 1
-        except Exception as e:
-            logger.error(f"   ❌ Error updating: {e}")
+            if not dry_run:
+                try:
+                    client.table('gdd_documents').update({
+                        'pdf_storage_path': matched_file
+                    }).eq('doc_id', doc_id).execute()
+                    logger.info(f"   ✅ Updated")
+                    fixed_count += 1
+                except Exception as e:
+                    logger.error(f"   ❌ Error updating: {e}")
+            else:
+                logger.info(f"   [DRY RUN] Would update")
+                fixed_count += 1
+        else:
+            logger.warning(f"\n⚠️  {doc_id}")
+            logger.warning(f"   Current: {stored_path}")
+            logger.warning(f"   ❌ No matching PDF found in storage")
+            not_found_count += 1
     
     # Summary
-    logger.info("\n" + "="*80)
-    logger.info("UPDATE SUMMARY")
-    logger.info("="*80)
-    logger.info(f"Total documents:      {len(documents)}")
-    logger.info(f"Updated:               {updated_count}")
-    logger.info(f"Already correct:       {already_correct_count}")
-    logger.info(f"No match found:        {no_match_count}")
-    logger.info("="*80)
+    logger.info("\n" + "=" * 80)
+    logger.info("SUMMARY")
+    logger.info("=" * 80)
+    logger.info(f"Already correct:  {already_correct_count}")
+    logger.info(f"Fixed:            {fixed_count}")
+    logger.info(f"Not found:        {not_found_count}")
+    logger.info("=" * 80)
     
-    # Verify
-    logger.info("\n🔍 Verifying updates...")
-    try:
-        result = client.table('gdd_documents').select('doc_id, pdf_storage_path').execute()
-        docs_with_pdf = [d for d in result.data if d.get('pdf_storage_path')]
-        
-        logger.info(f"✓ Documents with PDF path: {len(docs_with_pdf)}")
-        
-        if docs_with_pdf:
-            logger.info("\nUpdated documents:")
-            for doc in docs_with_pdf:
-                logger.info(f"  - {doc['doc_id']}: {doc['pdf_storage_path']}")
-    except Exception as e:
-        logger.error(f"Error verifying: {e}")
+    if dry_run:
+        logger.info("\n💡 This was a dry run. Run without --dry-run to apply changes.")
+    else:
+        logger.info("\n✅ Done!")
 
 
 if __name__ == "__main__":
-    logger.info("Starting PDF storage path fix...")
-    logger.info(f"Project root: {PROJECT_ROOT}")
-    fix_pdf_storage_paths()
-    logger.info("\n✅ Done!")
+    import argparse
+    parser = argparse.ArgumentParser(description='Fix pdf_storage_path in database')
+    parser.add_argument('--dry-run', action='store_true', help='Show what would be changed without applying')
+    args = parser.parse_args()
+    
+    fix_pdf_storage_paths(dry_run=args.dry_run)

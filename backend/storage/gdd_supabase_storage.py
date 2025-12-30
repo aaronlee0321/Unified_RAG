@@ -345,6 +345,19 @@ def get_gdd_top_chunks_supabase(
             if doc_id_normalized == target_doc_id_normalized:
                 matched_doc_ids = [doc_id]
                 break
+            # Fallback: normalize both by removing special chars for fuzzy matching
+            def normalize_for_fuzzy(text):
+                """Normalize text by removing special chars for fuzzy matching."""
+                if not text:
+                    return ""
+                return text.lower().replace("_", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "").replace("[", "").replace("]", "").replace(",", "")
+            
+            target_fuzzy = normalize_for_fuzzy(target_doc_id_normalized)
+            doc_id_fuzzy = normalize_for_fuzzy(doc_id_normalized)
+            
+            # Try fuzzy match (removing special chars)
+            if target_fuzzy == doc_id_fuzzy:
+                matched_doc_ids.append(doc_id)
             # Fallback to substring match if exact match fails
             elif target_doc_id_normalized in doc_id_normalized or doc_id_normalized in target_doc_id_normalized:
                 matched_doc_ids.append(doc_id)
@@ -630,21 +643,123 @@ def index_gdd_chunks_to_supabase(
         raise ValueError("Supabase is not configured")
     
     try:
+        import logging
+        import time
+        import threading
+        
+        logger = logging.getLogger(__name__)
+        
         # Create embedding function
         embedding_func = make_embedding_func(provider)
         
+        def generate_embedding_with_timeout(content, timeout=30):
+            """Generate embedding with timeout protection (cross-platform)."""
+            result_container = [None]
+            exception_container = [None]
+            
+            def embed_worker():
+                try:
+                    result_container[0] = embedding_func([content])[0]
+                except Exception as e:
+                    exception_container[0] = e
+            
+            thread = threading.Thread(target=embed_worker)
+            thread.daemon = True
+            thread.start()
+            thread.join(timeout=timeout)
+            
+            if thread.is_alive():
+                # Thread is still running - timeout occurred
+                logger.error(f"Embedding generation exceeded {timeout}s timeout")
+                raise TimeoutError(f"Embedding generation exceeded {timeout}s timeout")
+            
+            if exception_container[0]:
+                raise exception_container[0]
+            
+            if result_container[0] is None:
+                raise Exception("Embedding generation returned None")
+            
+            return result_container[0]
+        
         # Prepare chunks for Supabase
         supabase_chunks = []
+        failed_chunks = []
+        
+        logger.info(f"Generating embeddings for {len(chunks)} chunks...")
+        
         for i, chunk in enumerate(chunks):
-            chunk_id = chunk.get("chunk_id") or f"{doc_id}_chunk_{i}"
-            content = chunk.get("content", "")
+            # Handle both MarkdownChunk objects and dictionaries
+            if hasattr(chunk, 'chunk_id'):
+                # MarkdownChunk object
+                raw_chunk_id = chunk.chunk_id
+                content = chunk.content
+                chunk_metadata = chunk.metadata if hasattr(chunk, 'metadata') else {}
+                chunk_section = chunk_metadata.get('section_header', '') if isinstance(chunk_metadata, dict) else ''
+            else:
+                # Dictionary
+                raw_chunk_id = chunk.get("chunk_id") or f"chunk_{i:03d}"
+                content = chunk.get("content", "")
+                chunk_metadata = chunk.get("metadata", {})
+                chunk_section = chunk.get("section", "")
             
-            # Generate embedding
-            try:
-                embedding = embedding_func([content])[0]
-            except Exception as e:
-                print(f"Warning: Failed to embed chunk {chunk_id}: {e}")
+            # Make chunk_id globally unique by prepending doc_id: "{doc_id}_chunk_001"
+            chunk_id = f"{doc_id}_{raw_chunk_id}"
+            
+            # Skip empty content
+            if not content or not content.strip():
+                logger.warning(f"Skipping chunk {chunk_id} (index {i}): empty content")
+                failed_chunks.append((i, chunk_id, "empty content"))
                 continue
+            
+            # Generate embedding with retry and timeout
+            embedding = None
+            max_retries = 3
+            timeout_seconds = 30  # 30 second timeout per embedding
+            
+            for attempt in range(max_retries):
+                try:
+                    if (i + 1) % 5 == 0:  # Log progress every 5 chunks
+                        logger.info(f"Processing chunk {i+1}/{len(chunks)} (attempt {attempt+1}/{max_retries})")
+                    
+                    start_time = time.time()
+                    
+                    # Generate embedding with timeout protection
+                    embedding = generate_embedding_with_timeout(content, timeout_seconds)
+                    
+                    elapsed = time.time() - start_time
+                    if elapsed > 5:  # Log slow embeddings
+                        logger.warning(f"Slow embedding generation: {elapsed:.2f}s for chunk {chunk_id}")
+                    
+                    break  # Success, exit retry loop
+                    
+                except TimeoutError as e:
+                    elapsed = time.time() - start_time if 'start_time' in locals() else 0
+                    if attempt == max_retries - 1:
+                        logger.error(f"Timeout embedding chunk {chunk_id} (index {i}) after {max_retries} attempts")
+                        failed_chunks.append((i, chunk_id, f"timeout after {elapsed:.2f}s"))
+                        raise Exception(f"Failed to embed chunk {chunk_id} (index {i}): timeout after {elapsed:.2f}s")
+                    else:
+                        wait_time = (2 ** attempt) * 1.0
+                        logger.warning(f"Embedding timeout for chunk {chunk_id} (index {i}), retrying in {wait_time:.1f}s...")
+                        time.sleep(wait_time)
+                        
+                except Exception as e:
+                    elapsed = time.time() - start_time if 'start_time' in locals() else 0
+                    
+                    if attempt == max_retries - 1:
+                        # Last attempt failed
+                        logger.error(f"Failed to embed chunk {chunk_id} (index {i}) after {max_retries} attempts: {e}")
+                        failed_chunks.append((i, chunk_id, str(e)))
+                        # Don't skip - raise error to prevent silent data loss
+                        raise Exception(f"Failed to embed chunk {chunk_id} (index {i}): {e}. This indicates a critical indexing error.")
+                    else:
+                        # Retry with exponential backoff
+                        wait_time = (2 ** attempt) * 1.0  # 1s, 2s, 4s
+                        logger.warning(f"Embedding attempt {attempt + 1} failed for chunk {chunk_id} (index {i}) after {elapsed:.2f}s, retrying in {wait_time:.1f}s... Error: {e}")
+                        time.sleep(wait_time)
+            
+            if embedding is None:
+                continue  # Should not reach here due to raise above, but safety check
             
             supabase_chunks.append({
                 "chunk_id": chunk_id,
@@ -659,7 +774,17 @@ def index_gdd_chunks_to_supabase(
             })
         
         # Insert document metadata
-        file_path = chunks[0].get("file_path", "") if chunks else ""
+        # Handle both MarkdownChunk objects and dictionaries
+        if chunks:
+            first_chunk = chunks[0]
+            if hasattr(first_chunk, 'metadata'):
+                # MarkdownChunk object - no file_path attribute
+                file_path = ""
+            else:
+                # Dictionary
+                file_path = first_chunk.get("file_path", "")
+        else:
+            file_path = ""
         doc_name = Path(file_path).name if file_path else doc_id
         
         # Store markdown content and PDF path in Supabase
@@ -671,10 +796,30 @@ def index_gdd_chunks_to_supabase(
             pdf_storage_path=pdf_storage_path  # Store PDF storage path
         )
         
+        # Report any failed chunks before insertion
+        if failed_chunks:
+            logger.error(f"CRITICAL: {len(failed_chunks)} chunks failed embedding for document {doc_id}:")
+            for idx, chunk_id, error in failed_chunks[:10]:  # Show first 10
+                logger.error(f"  - Chunk {idx} ({chunk_id}): {error}")
+            if len(failed_chunks) > 10:
+                logger.error(f"  ... and {len(failed_chunks) - 10} more")
+            raise Exception(f"Failed to embed {len(failed_chunks)} out of {len(chunks)} chunks for document {doc_id}. Indexing aborted to prevent data loss.")
+        
         # Insert chunks
+        logger.info(f"Inserting {len(supabase_chunks)} chunks to Supabase...")
         inserted_count = insert_gdd_chunks(supabase_chunks)
         
-        print(f"Indexed {inserted_count} chunks for document {doc_id} to Supabase")
+        # Verify all chunks were inserted
+        if inserted_count != len(supabase_chunks):
+            logger.error(f"WARNING: Only {inserted_count} out of {len(supabase_chunks)} chunks were inserted for document {doc_id}")
+        
+        # Use logger instead of print to handle Unicode characters properly
+        try:
+            logger.info(f"Indexed {inserted_count} chunks for document {doc_id} to Supabase")
+        except UnicodeEncodeError:
+            # Fallback if logger also has encoding issues
+            logger.info(f"Indexed {inserted_count} chunks for document to Supabase")
+        
         return True
         
     except Exception as e:
