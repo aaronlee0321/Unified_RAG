@@ -86,3 +86,4 @@ def embed_document_chunks(doc_id: str, model: Optional[str] = None, batch_size: 
     return total_embedded
 
 
+

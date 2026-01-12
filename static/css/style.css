@@ -638,103 +638,276 @@ main {
 }
 
 /* Document Explainer styles */
-.explainer-section {
-    padding: 20px;
+#tab-explainer {
+    display: block;
+}
+
+#tab-explainer.tab-content.active {
+    display: block;
+}
+
+.explainer-layout {
+    display: grid;
+    grid-template-columns: 550px 1fr;
+    gap: 20px;
+    padding: 0;
+    align-items: start;
+}
+
+.explainer-left {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.explainer-right {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.explainer-bubble {
     background: #fff;
     border: 2px solid #333;
-    box-shadow: 4px 4px 0 #333;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
-.explainer-section h3 {
-    margin-bottom: 10px;
+.bubble-title {
+    margin: 0 0 15px 0;
     color: #333;
-    font-size: 1.5rem;
+    font-size: 1.2rem;
+    font-weight: bold;
+    flex-shrink: 0;
 }
 
-.explainer-section p {
-    margin-bottom: 20px;
-    color: #666;
-    font-size: 0.95rem;
+.bubble-content {
+    flex: 1;
+    overflow-y: auto;
+    color: #444;
+    line-height: 1.6;
 }
 
-.input-row {
+.placeholder-text {
+    color: #999;
+    font-style: italic;
+    margin: 0;
+}
+
+/* Keyword Search Bubble */
+.keyword-search-bubble {
+    flex-shrink: 0;
+}
+
+.keyword-input-wrapper {
     display: flex;
     gap: 10px;
-    margin-bottom: 15px;
+    align-items: center;
 }
 
-.input-field {
+.keyword-input {
     flex: 1;
-    padding: 10px;
-    border: 2px solid #333;
+    padding: 10px 15px;
+    border: 2px solid #ddd;
+    border-radius: 4px;
     font-family: 'Courier New', monospace;
     font-size: 0.95rem;
     background: #fff;
 }
 
-.input-field:focus {
+.keyword-input:focus {
     outline: none;
-    box-shadow: 2px 2px 0 #333;
+    border-color: #b8c6db;
 }
 
-.status-message {
+.search-icon-btn {
     padding: 10px;
-    margin-bottom: 15px;
-    border: 2px solid #333;
     background: #f5f5f5;
-    font-size: 0.9rem;
-}
-
-.checkbox-label {
-    display: block;
-    margin-bottom: 10px;
-    font-weight: bold;
+    border: 2px solid #333;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
     color: #333;
 }
 
-.checkbox-group {
-    max-height: 400px;
-    overflow-y: auto;
-    border: 2px solid #333;
-    padding: 15px;
-    background: #fff;
-    margin-bottom: 15px;
+.search-icon-btn:hover {
+    background: #e0e0e0;
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0 #333;
 }
 
-.checkbox-item {
+.search-icon-btn:active {
+    transform: translate(2px, 2px);
+    box-shadow: none;
+}
+
+.search-icon-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Results Count */
+.results-count {
+    font-size: 0.9rem;
+    color: #666;
+    padding: 5px 0;
+    flex-shrink: 0;
+}
+
+/* Document Selection Bubble */
+.document-selection-bubble {
+    display: flex;
+    flex-direction: column;
+    min-height: 400px;
+    max-height: 600px;
+    overflow: hidden;
+}
+
+.select-all-none {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #ddd;
+    flex-shrink: 0;
+}
+
+.select-option {
     display: flex;
     align-items: center;
-    padding: 8px;
-    margin-bottom: 8px;
-    border: 1px solid #ddd;
+    gap: 8px;
     cursor: pointer;
-    transition: background-color 0.2s;
+    font-size: 0.9rem;
 }
 
-.checkbox-item:hover {
-    background-color: #f0f0f0;
-}
-
-.checkbox-item input[type="checkbox"] {
-    margin-right: 10px;
+.select-option input[type="checkbox"] {
     width: 18px;
     height: 18px;
     cursor: pointer;
     accent-color: #b8c6db;
 }
 
-.checkbox-item label {
+.document-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 1;
+    min-height: 0;
+}
+
+.document-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.document-item:hover {
+    background-color: #f5f5f5;
+}
+
+.document-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: #b8c6db;
+    flex-shrink: 0;
+}
+
+.document-item label {
     flex: 1;
     cursor: pointer;
     font-size: 0.9rem;
     line-height: 1.4;
     user-select: none;
+    margin: 0;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
-.button-row {
+/* Generate Button */
+.generate-btn {
+    padding: 12px 20px;
+    background: #b8c6db;
+    border: 2px solid #333;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 1rem;
+    font-weight: bold;
+    color: #333;
+    cursor: pointer;
     display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.2s;
+    box-shadow: 2px 2px 0 #333;
+    flex-shrink: 0;
+}
+
+.generate-btn:hover:not(:disabled) {
+    background: #a8b6cb;
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0 #333;
+}
+
+.generate-btn:active:not(:disabled) {
+    transform: translate(2px, 2px);
+    box-shadow: none;
+}
+
+.generate-btn:disabled {
+    background: #e0e0e0;
+    color: #999;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* Explanation Bubble */
+.explanation-bubble {
+    display: flex;
+    flex-direction: column;
+    min-height: 400px;
+    max-height: 600px;
+    overflow: hidden;
+}
+
+/* Bottom Row */
+.explainer-bottom-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+}
+
+.source-chunks-bubble,
+.metadata-bubble {
+    display: flex;
+    flex-direction: column;
+    min-height: 200px;
+    max-height: 300px;
+    overflow: hidden;
+}
+
+/* Source Chunks - consistent font styling */
+.source-chunks-bubble .bubble-content {
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+}
+
+.source-chunks-bubble .bubble-content * {
+    font-family: inherit;
 }
 
 .button-row .btn-primary {
@@ -745,39 +918,31 @@ main {
     flex: 1;
 }
 
-.markdown-output {
-    margin-top: 20px;
-    padding: 20px;
-    background: #f9f9f9;
-    border: 2px solid #333;
-    box-shadow: 4px 4px 0 #333;
-    min-height: 100px;
-}
-
-.markdown-output h2,
-.markdown-output h3 {
+/* Markdown output styles for bubble content */
+.bubble-content h2,
+.bubble-content h3 {
     margin-top: 20px;
     margin-bottom: 10px;
     color: #333;
 }
 
-.markdown-output h2:first-child,
-.markdown-output h3:first-child {
+.bubble-content h2:first-child,
+.bubble-content h3:first-child {
     margin-top: 0;
 }
 
-.markdown-output p {
+.bubble-content p {
     margin-bottom: 10px;
     line-height: 1.6;
 }
 
-.markdown-output ul,
-.markdown-output ol {
+.bubble-content ul,
+.bubble-content ol {
     margin-left: 20px;
     margin-bottom: 10px;
 }
 
-.markdown-output code {
+.bubble-content code {
     background: #e0e0e0;
     padding: 2px 6px;
     border-radius: 3px;
@@ -785,7 +950,7 @@ main {
     font-size: 0.9em;
 }
 
-.markdown-output pre {
+.bubble-content pre {
     background: #e0e0e0;
     padding: 15px;
     border-radius: 3px;
@@ -793,7 +958,7 @@ main {
     margin-bottom: 10px;
 }
 
-.markdown-output pre code {
+.bubble-content pre code {
     background: none;
     padding: 0;
 }

@@ -39,9 +39,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const explainerSearchBtn = document.getElementById('explainer-search-btn');
     const explainerResultsContainer = document.getElementById('explainer-results-container');
     const explainerResultsCheckboxes = document.getElementById('explainer-results-checkboxes');
-    const searchStatus = document.getElementById('search-status');
-    const selectAllBtn = document.getElementById('select-all-btn');
-    const selectNoneBtn = document.getElementById('select-none-btn');
+    const resultsCount = document.getElementById('results-count');
+    const selectAllCheckbox = document.getElementById('select-all-checkbox');
+    const selectNoneCheckbox = document.getElementById('select-none-checkbox');
     const explainBtn = document.getElementById('explain-btn');
     const explanationOutput = document.getElementById('explanation-output');
     const sourceChunksOutput = document.getElementById('source-chunks-output');
@@ -51,31 +51,34 @@ document.addEventListener('DOMContentLoaded', function() {
     let storedResults = []; // Replaces explainer_search_results_store
     let lastSearchKeyword = null; // Replaces last_search_keyword
     
-    // Event handlers (exact behavior replication)
+    // Event handlers
     explainerSearchBtn.addEventListener('click', searchForExplainer);
     explainerKeyword.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
             searchForExplainer();
         }
     });
-    selectAllBtn.addEventListener('click', selectAllItems);
-    selectNoneBtn.addEventListener('click', selectNoneItems);
+    explainerKeyword.addEventListener('input', updateGenerateButtonState);
+    selectAllCheckbox.addEventListener('change', handleSelectAll);
+    selectNoneCheckbox.addEventListener('change', handleSelectNone);
     explainBtn.addEventListener('click', generateExplanation);
+    
+    // Initialize button state
+    updateGenerateButtonState();
     
     async function searchForExplainer() {
         const keyword = explainerKeyword.value.trim();
         
         if (!keyword) {
-            showStatus("Please enter a keyword to search.", false);
             explainerResultsContainer.style.display = 'none';
+            resultsCount.style.display = 'none';
             storedResults = [];
+            updateGenerateButtonState();
             return;
         }
         
         try {
             explainerSearchBtn.disabled = true;
-            explainerSearchBtn.textContent = 'Searching...';
-            showStatus("Searching...", true);
             
             const response = await fetch('/api/gdd/explainer/search', {
                 method: 'POST',
@@ -88,10 +91,11 @@ document.addEventListener('DOMContentLoaded', function() {
             const result = await response.json();
             
             if (!result.success) {
-                showStatus(result.status_msg || "Error occurred.", false);
                 explainerResultsContainer.style.display = 'none';
+                resultsCount.style.display = 'none';
                 storedResults = [];
                 lastSearchKeyword = null;
+                updateGenerateButtonState();
                 return;
             }
             
@@ -102,23 +106,27 @@ document.addEventListener('DOMContentLoaded', function() {
             // Clear previous checkboxes and render new ones
             renderCheckboxes(result.choices || []);
             
-            // Show results container
+            // Show results container and count
             if (result.choices && result.choices.length > 0) {
+                const count = result.choices.length;
+                resultsCount.textContent = `Found ${count} result(s).`;
+                resultsCount.style.display = 'block';
                 explainerResultsContainer.style.display = 'block';
-                showStatus(result.status_msg || "Search completed.", true);
+                updateGenerateButtonState();
             } else {
                 explainerResultsContainer.style.display = 'none';
-                showStatus("No results found.", false);
+                resultsCount.style.display = 'none';
+                updateGenerateButtonState();
             }
             
         } catch (error) {
             console.error('Error in search:', error);
-            showStatus(`❌ Error: ${error.message}`, false);
             explainerResultsContainer.style.display = 'none';
+            resultsCount.style.display = 'none';
             storedResults = [];
+            updateGenerateButtonState();
         } finally {
             explainerSearchBtn.disabled = false;
-            explainerSearchBtn.textContent = 'Search';
         }
     }
     
@@ -130,27 +138,33 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         choices.forEach((choice, index) => {
-            const checkboxItem = document.createElement('div');
-            checkboxItem.className = 'checkbox-item';
+            const documentItem = document.createElement('div');
+            documentItem.className = 'document-item';
             
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.id = `checkbox-${index}`;
             checkbox.value = choice;
             checkbox.name = 'explainer-choice';
+            checkbox.addEventListener('change', updateGenerateButtonState);
+            checkbox.addEventListener('change', updateSelectAllNoneState);
             
             const label = document.createElement('label');
             label.htmlFor = `checkbox-${index}`;
             label.textContent = choice;
             
-            checkboxItem.appendChild(checkbox);
-            checkboxItem.appendChild(label);
-            explainerResultsCheckboxes.appendChild(checkboxItem);
+            documentItem.appendChild(checkbox);
+            documentItem.appendChild(label);
+            explainerResultsCheckboxes.appendChild(documentItem);
         });
+        
+        // Reset select all/none checkboxes
+        selectAllCheckbox.checked = false;
+        selectNoneCheckbox.checked = false;
     }
     
     function getSelectedChoices() {
-        const checkboxes = explainerResultsCheckboxes.querySelectorAll('input[type="checkbox"]:checked');
+        const checkboxes = explainerResultsCheckboxes.querySelectorAll('input[type="checkbox"][name="explainer-choice"]:checked');
         return Array.from(checkboxes).map(cb => cb.value);
     }
     
@@ -158,34 +172,33 @@ document.addEventListener('DOMContentLoaded', function() {
         const keyword = explainerKeyword.value.trim();
         
         if (!keyword) {
-            explanationOutput.innerHTML = "<p>Please enter a keyword first.</p>";
-            sourceChunksOutput.innerHTML = '';
-            metadataOutput.innerHTML = '';
+            explanationOutput.innerHTML = '<p class="placeholder-text">Please enter a keyword first.</p>';
+            sourceChunksOutput.innerHTML = '<p class="placeholder-text">No source chunks yet.</p>';
+            metadataOutput.innerHTML = '<p class="placeholder-text">No metadata yet.</p>';
             return;
         }
         
         if (!storedResults || storedResults.length === 0) {
-            explanationOutput.innerHTML = "<p>Please search for a keyword first.</p>";
-            sourceChunksOutput.innerHTML = '';
-            metadataOutput.innerHTML = '';
+            explanationOutput.innerHTML = '<p class="placeholder-text">Please search for a keyword first.</p>';
+            sourceChunksOutput.innerHTML = '<p class="placeholder-text">No source chunks yet.</p>';
+            metadataOutput.innerHTML = '<p class="placeholder-text">No metadata yet.</p>';
             return;
         }
         
         const selectedChoices = getSelectedChoices();
         
         if (!selectedChoices || selectedChoices.length === 0) {
-            explanationOutput.innerHTML = "<p>Please select at least one document/section to explain.</p>";
-            sourceChunksOutput.innerHTML = '';
-            metadataOutput.innerHTML = '';
+            explanationOutput.innerHTML = '<p class="placeholder-text">Please select at least one document/section to explain.</p>';
+            sourceChunksOutput.innerHTML = '<p class="placeholder-text">No source chunks yet.</p>';
+            metadataOutput.innerHTML = '<p class="placeholder-text">No metadata yet.</p>';
             return;
         }
         
         try {
             explainBtn.disabled = true;
-            explainBtn.textContent = 'Generating...';
-            explanationOutput.innerHTML = "<p>Generating explanation...</p>";
-            sourceChunksOutput.innerHTML = '';
-            metadataOutput.innerHTML = '';
+            explanationOutput.innerHTML = '<p>Generating explanation...</p>';
+            sourceChunksOutput.innerHTML = '<p class="placeholder-text">No source chunks yet.</p>';
+            metadataOutput.innerHTML = '<p class="placeholder-text">No metadata yet.</p>';
             
             const response = await fetch('/api/gdd/explainer/explain', {
                 method: 'POST',
@@ -203,8 +216,8 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (!result.success) {
                 explanationOutput.innerHTML = `<p>${result.explanation || 'Error occurred.'}</p>`;
-                sourceChunksOutput.innerHTML = '';
-                metadataOutput.innerHTML = '';
+                sourceChunksOutput.innerHTML = '<p class="placeholder-text">No source chunks yet.</p>';
+                metadataOutput.innerHTML = '<p class="placeholder-text">No metadata yet.</p>';
                 return;
             }
             
@@ -216,59 +229,90 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Error generating explanation:', error);
             explanationOutput.innerHTML = `<p>❌ Error: ${error.message}</p>`;
-            sourceChunksOutput.innerHTML = '';
-            metadataOutput.innerHTML = '';
+            sourceChunksOutput.innerHTML = '<p class="placeholder-text">No source chunks yet.</p>';
+            metadataOutput.innerHTML = '<p class="placeholder-text">No metadata yet.</p>';
         } finally {
             explainBtn.disabled = false;
-            explainBtn.textContent = 'Generate Explanation';
+            updateGenerateButtonState();
         }
     }
     
-    async function selectAllItems() {
-        if (!storedResults || storedResults.length === 0) {
-            return;
+    async function handleSelectAll() {
+        if (selectAllCheckbox.checked) {
+            selectNoneCheckbox.checked = false;
+            if (!storedResults || storedResults.length === 0) {
+                selectAllCheckbox.checked = false;
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/gdd/explainer/select-all', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        stored_results: storedResults
+                    })
+                });
+                
+                const result = await response.json();
+                
+                // Check all checkboxes
+                const checkboxes = explainerResultsCheckboxes.querySelectorAll('input[type="checkbox"][name="explainer-choice"]');
+                const choices = result.choices || [];
+                
+                checkboxes.forEach(checkbox => {
+                    if (choices.includes(checkbox.value)) {
+                        checkbox.checked = true;
+                    }
+                });
+                
+                updateGenerateButtonState();
+            } catch (error) {
+                console.error('Error selecting all:', error);
+                selectAllCheckbox.checked = false;
+            }
         }
-        
-        try {
-            const response = await fetch('/api/gdd/explainer/select-all', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    stored_results: storedResults
-                })
-            });
-            
-            const result = await response.json();
-            
-            // Check all checkboxes
-            const checkboxes = explainerResultsCheckboxes.querySelectorAll('input[type="checkbox"]');
-            const choices = result.choices || [];
-            
+    }
+    
+    function handleSelectNone() {
+        if (selectNoneCheckbox.checked) {
+            selectAllCheckbox.checked = false;
+            const checkboxes = explainerResultsCheckboxes.querySelectorAll('input[type="checkbox"][name="explainer-choice"]');
             checkboxes.forEach(checkbox => {
-                if (choices.includes(checkbox.value)) {
-                    checkbox.checked = true;
-                }
+                checkbox.checked = false;
             });
-            
-        } catch (error) {
-            console.error('Error selecting all:', error);
+            updateGenerateButtonState();
         }
     }
     
-    function selectNoneItems() {
-        const checkboxes = explainerResultsCheckboxes.querySelectorAll('input[type="checkbox"]');
-        checkboxes.forEach(checkbox => {
-            checkbox.checked = false;
-        });
+    function updateSelectAllNoneState() {
+        const checkboxes = explainerResultsCheckboxes.querySelectorAll('input[type="checkbox"][name="explainer-choice"]');
+        const checkedCount = explainerResultsCheckboxes.querySelectorAll('input[type="checkbox"][name="explainer-choice"]:checked').length;
+        const totalCount = checkboxes.length;
+        
+        if (checkedCount === 0) {
+            selectAllCheckbox.checked = false;
+            selectNoneCheckbox.checked = false;
+        } else if (checkedCount === totalCount) {
+            selectAllCheckbox.checked = true;
+            selectNoneCheckbox.checked = false;
+        } else {
+            selectAllCheckbox.checked = false;
+            selectNoneCheckbox.checked = false;
+        }
     }
     
-    function showStatus(message, isSuccess) {
-        searchStatus.textContent = message;
-        searchStatus.style.display = 'block';
-        searchStatus.style.backgroundColor = isSuccess ? '#f0f9f0' : '#f9f0f0';
-        searchStatus.style.borderColor = isSuccess ? '#4caf50' : '#f44336';
+    function updateGenerateButtonState() {
+        const selectedChoices = getSelectedChoices();
+        const keyword = explainerKeyword.value.trim();
+        
+        if (keyword && selectedChoices && selectedChoices.length > 0) {
+            explainBtn.disabled = false;
+        } else {
+            explainBtn.disabled = true;
+        }
     }
     
     function renderMarkdown(text) {
@@ -303,4 +347,5 @@ document.addEventListener('DOMContentLoaded', function() {
         return html;
     }
 });
+
 

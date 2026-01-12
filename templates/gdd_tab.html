@@ -49,38 +49,84 @@
     
     <!-- Tab 2: Document Explainer (NEW) -->
     <div id="tab-explainer" class="tab-content" style="display: none;">
-        <div class="explainer-section">
-            <h3>Get Detailed Explanations from Documents</h3>
-            <p>Enter a keyword, select documents/sections, and get AI-generated explanations.</p>
-            
-            <!-- Keyword Input Row -->
-            <div class="input-row">
-                <input type="text" id="explainer-keyword" 
-                       placeholder="e.g., tank movement, combat system, progression" 
-                       class="input-field">
-                <button id="explainer-search-btn" class="btn-secondary">Search</button>
+        <div class="explainer-layout">
+            <!-- Left Column -->
+            <div class="explainer-left">
+                <!-- Keyword Search Bubble -->
+                <div class="explainer-bubble keyword-search-bubble">
+                    <h3 class="bubble-title">Keyword Search</h3>
+                    <div class="keyword-input-wrapper">
+                        <input type="text" id="explainer-keyword" 
+                               placeholder="Enter keyword..." 
+                               class="keyword-input">
+                        <button id="explainer-search-btn" class="search-icon-btn">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Results Count -->
+                <div id="results-count" class="results-count" style="display: none;"></div>
+                
+                <!-- Document Selection -->
+                <div id="explainer-results-container" class="explainer-bubble document-selection-bubble" style="display: none;">
+                    <h3 class="bubble-title">Select Documents</h3>
+                    <div class="select-all-none">
+                        <label class="select-option">
+                            <input type="checkbox" id="select-all-checkbox">
+                            <span>All</span>
+                        </label>
+                        <label class="select-option">
+                            <input type="checkbox" id="select-none-checkbox">
+                            <span>None</span>
+                        </label>
+                    </div>
+                    <div id="explainer-results-checkboxes" class="document-list"></div>
+                </div>
+                
+                <!-- Generate Explanation Button -->
+                <button id="explain-btn" class="btn-primary generate-btn" disabled>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                        <path d="M2 17l10 5 10-5"></path>
+                        <path d="M2 12l10 5 10-5"></path>
+                    </svg>
+                    Generate Explanation
+                </button>
             </div>
             
-            <!-- Search Status -->
-            <div id="search-status" class="status-message" style="display: none;"></div>
-            
-            <!-- Checkbox Group Container -->
-            <div id="explainer-results-container" style="display: none;">
-                <label class="checkbox-label">Search Results - Select Documents/Sections to Explain</label>
-                <div id="explainer-results-checkboxes" class="checkbox-group"></div>
+            <!-- Right Column -->
+            <div class="explainer-right">
+                <!-- Explanation Bubble (Large) -->
+                <div class="explainer-bubble explanation-bubble">
+                    <h3 class="bubble-title">Explanation</h3>
+                    <div id="explanation-output" class="bubble-content">
+                        <p class="placeholder-text">Search for a keyword and select documents to generate an explanation.</p>
+                    </div>
+                </div>
+                
+                <!-- Bottom Row: Source Chunks and Metadata -->
+                <div class="explainer-bottom-row">
+                    <!-- Source Chunks Bubble (Left) -->
+                    <div class="explainer-bubble source-chunks-bubble">
+                        <h3 class="bubble-title">Source Chunks</h3>
+                        <div id="source-chunks-output" class="bubble-content">
+                            <p class="placeholder-text">No source chunks yet.</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Metadata Bubble (Right) -->
+                    <div class="explainer-bubble metadata-bubble">
+                        <h3 class="bubble-title">Metadata</h3>
+                        <div id="metadata-output" class="bubble-content">
+                            <p class="placeholder-text">No metadata yet.</p>
+                        </div>
+                    </div>
+                </div>
             </div>
-            
-            <!-- Action Buttons -->
-            <div class="button-row">
-                <button id="select-all-btn" class="btn-secondary">Select All</button>
-                <button id="select-none-btn" class="btn-secondary">Select None</button>
-                <button id="explain-btn" class="btn-primary">Generate Explanation</button>
-            </div>
-            
-            <!-- Output Areas (Markdown) -->
-            <div id="explanation-output" class="markdown-output"></div>
-            <div id="source-chunks-output" class="markdown-output"></div>
-            <div id="metadata-output" class="markdown-output"></div>
         </div>
     </div>
 </div>

@@ -108,3 +108,4 @@ def hyde_expand_query(query: str) -> Tuple[str, Dict]:
         return query, {"total_time": 0, "error": str(e)}
 
 
+
