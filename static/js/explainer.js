@@ -221,10 +221,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
-            // Render markdown outputs
-            explanationOutput.innerHTML = renderMarkdown(result.explanation || '');
-            sourceChunksOutput.innerHTML = renderMarkdown(result.source_chunks || '');
-            metadataOutput.innerHTML = renderMarkdown(result.metadata || '');
+            // Render markdown outputs (strip duplicate headings)
+            explanationOutput.innerHTML = renderMarkdown(result.explanation || '', 'Explanation');
+            sourceChunksOutput.innerHTML = renderMarkdown(result.source_chunks || '', 'Source Chunks');
+            metadataOutput.innerHTML = renderMarkdown(result.metadata || '', 'Metadata');
             
         } catch (error) {
             console.error('Error generating explanation:', error);
@@ -315,11 +315,35 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    function renderMarkdown(text) {
+    function renderMarkdown(text, stripHeading) {
         if (!text) return '';
         
         // Simple markdown rendering (for better results, consider using marked.js)
         let html = text;
+        
+        // Strip duplicate headings that match the bubble title
+        if (stripHeading) {
+            // Remove headings that exactly match the bubble title (case-insensitive)
+            const headingPatterns = [
+                new RegExp(`^#+\\s*${stripHeading}\\s*$`, 'gim'),
+                new RegExp(`^#+\\s*${stripHeading.replace(/\s+/g, '\\s+')}\\s*$`, 'gim')
+            ];
+            
+            headingPatterns.forEach(pattern => {
+                html = html.replace(pattern, '');
+            });
+            
+            // Also remove if it's the first line and matches
+            const lines = html.split('\n');
+            if (lines.length > 0) {
+                const firstLine = lines[0].trim();
+                const headingMatch = firstLine.match(/^#+\s*(.+)$/i);
+                if (headingMatch && headingMatch[1].trim().toLowerCase() === stripHeading.toLowerCase()) {
+                    lines.shift();
+                    html = lines.join('\n');
+                }
+            }
+        }
         
         // Headers
         html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');

@@ -765,6 +765,7 @@ main {
     flex-direction: column;
     min-height: 400px;
     max-height: 600px;
+    height: 500px;
     overflow: hidden;
 }
 
@@ -798,8 +799,10 @@ main {
     gap: 8px;
     overflow-y: auto;
     overflow-x: hidden;
-    flex: 1;
+    flex: 1 1 0;
     min-height: 0;
+    max-height: 100%;
+    position: relative;
 }
 
 .document-item {
@@ -811,6 +814,8 @@ main {
     border-radius: 4px;
     cursor: pointer;
     transition: background-color 0.2s;
+    flex-shrink: 0;
+    min-width: 0;
 }
 
 .document-item:hover {
@@ -835,6 +840,8 @@ main {
     word-wrap: break-word;
     overflow-wrap: break-word;
     word-break: break-word;
+    min-width: 0;
+    overflow: hidden;
 }
 
 /* Generate Button */
