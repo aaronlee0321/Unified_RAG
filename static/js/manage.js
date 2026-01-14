@@ -1,4 +1,4 @@
-// Manage Documents functionality - v2.1 (Metadata removed, Icons fixed)
+ // Manage Documents functionality - v2.1 (Metadata removed, Icons fixed)
 document.addEventListener('DOMContentLoaded', function() {
     // Internal tab navigation
     const tabButtons = document.querySelectorAll('.tab-btn[data-tab]');

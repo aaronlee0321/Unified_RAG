@@ -228,7 +228,7 @@ def generate_explanation(keyword: str, selected_choices: List[str], stored_resul
         # Build source chunks output
         source_chunks = result.get('source_chunks', [])
         chunks_text = f"### Source Chunks ({len(source_chunks)} chunks used)\n\n"
-        for i, chunk in enumerate(source_chunks[:10], 1):  # Show first 10
+        for i, chunk in enumerate(source_chunks, 1):  # Show all chunks (no limit)
             section = chunk.get('section_heading') or 'No section'
             content = chunk.get('content') or ''
             content_preview = content[:200] if content else '(Empty chunk)'
@@ -314,6 +314,7 @@ def select_none_items() -> Dict[str, Any]:
         Dict with empty 'choices' list
     """
     return {'choices': []}
+
 
 
 

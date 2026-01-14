@@ -16,18 +16,23 @@ try:
 except ImportError:
     OPENAI_AVAILABLE = False
 
-# Get API key and base URL
-api_key = os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("OPENAI_API_KEY")
+# Get API key and base URL - prioritize OpenAI
+# COMMENTED OUT: Qwen priority - using OpenAI first
+# api_key = os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("OPENAI_API_KEY")
+api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")
 if api_key:
     base_url = None
-    if os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY"):
-        base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    # COMMENTED OUT: Qwen/DashScope endpoint
+    # if os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY"):
+    #     base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     client = OpenAI(api_key=api_key, base_url=base_url) if OPENAI_AVAILABLE else None
 else:
     client = None
 
-# HYDE model
-_hyde_model = os.environ.get("HYDE_MODEL", "qwen-plus")
+# HYDE model - using OpenAI model
+# COMMENTED OUT: Qwen model default
+# _hyde_model = os.environ.get("HYDE_MODEL", "qwen-plus")
+_hyde_model = os.environ.get("HYDE_MODEL", "gpt-4o-mini")
 
 # GDD-Specific HYDE System Prompt
 GDD_HYDE_SYSTEM_PROMPT = '''You are a game design document search query rewriter for a GDD RAG system.

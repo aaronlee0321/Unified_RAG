@@ -1,0 +1,31 @@
+{
+  "keywords": [
+    {
+      "aliases": [
+        {
+          "createdAt": "2026-01-14T03:11:11.603Z",
+          "id": "alias-1768360271603",
+          "name": "xe tăng"
+        }
+      ],
+      "createdAt": "2026-01-14T03:10:51.179Z",
+      "id": "keyword-1768360251179",
+      "language": "EN",
+      "name": "tank"
+    },
+    {
+      "id": "keyword-1768360762173",
+      "name": "Thời gian",
+      "language": "VN",
+      "aliases": [
+        {
+          "id": "alias-1768360771470",
+          "name": "Time",
+          "createdAt": "2026-01-14T03:19:31.470Z"
+        }
+      ],
+      "createdAt": "2026-01-14T03:19:22.173Z"
+    }
+  ],
+  "lastUpdated": "2026-01-14T10:19:31.779381"
+}

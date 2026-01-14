@@ -24,7 +24,17 @@ document.addEventListener('DOMContentLoaded', function() {
     // State management (replaces Gradio State)
     let storedResults = []; // Replaces explainer_search_results_store
     let lastSearchKeyword = null; // Replaces last_search_keyword
+    let deepSearchContext = null; // Track deep search: { originalKeyword, selectedKeyword }
     
+    // Alias management state
+    const aliasState = {
+        keywords: [],
+        expandedKeywords: new Set(),
+        searchQuery: "",
+        selectedLanguage: null,
+        newAliasInput: {}
+    };
+
     // Event handlers
     explainerSearchBtn.addEventListener('click', searchForExplainer);
     explainerKeyword.addEventListener('keypress', function(e) {
@@ -50,6 +60,57 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
+    // Manage Aliases UI elements
+    const openAliasesBtn = document.getElementById('open-aliases-btn');
+    const closeAliasesBtn = document.getElementById('close-aliases-btn');
+    const aliasesDrawer = document.getElementById('aliases-drawer');
+    const aliasKeywordsList = document.getElementById('alias-keywords-list');
+    const aliasSearchInput = document.getElementById('alias-search-input');
+    const aliasResultsStats = document.getElementById('alias-results-stats');
+    const aliasAddKeywordBtn = document.getElementById('alias-add-keyword-btn');
+    const addAliasKeywordDialog = document.getElementById('add-alias-keyword-dialog');
+    const confirmAddAliasKeywordBtn = document.getElementById('confirm-add-alias-keyword');
+    const aliasLangFilterBtns = document.querySelectorAll('#aliases-drawer .filter-tag');
+
+    // Manage Aliases Event Listeners
+    if (openAliasesBtn) openAliasesBtn.addEventListener('click', () => {
+        aliasesDrawer.classList.add('open');
+        loadAliases();
+    });
+    if (closeAliasesBtn) closeAliasesBtn.addEventListener('click', () => aliasesDrawer.classList.remove('open'));
+    if (aliasSearchInput) aliasSearchInput.addEventListener('input', (e) => {
+        aliasState.searchQuery = e.target.value;
+        renderAliases();
+    });
+    if (aliasAddKeywordBtn) aliasAddKeywordBtn.addEventListener('click', () => {
+        addAliasKeywordDialog.classList.remove('hidden');
+        document.getElementById('new-alias-keyword-name').focus();
+    });
+    if (addAliasKeywordDialog) {
+        addAliasKeywordDialog.querySelector('.close-dialog-btn').onclick = () => addAliasKeywordDialog.classList.add('hidden');
+        addAliasKeywordDialog.onclick = (e) => { if (e.target === addAliasKeywordDialog) addAliasKeywordDialog.classList.add('hidden'); };
+    }
+    
+    aliasLangFilterBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            aliasLangFilterBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const lang = btn.dataset.lang;
+            aliasState.selectedLanguage = lang === 'all' ? null : lang;
+            renderAliases();
+        });
+    });
+
+    const modalLangBtns = document.querySelectorAll('.lang-select-btn');
+    modalLangBtns.forEach(btn => {
+        btn.onclick = () => {
+            modalLangBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        };
+    });
+
+    if (confirmAddAliasKeywordBtn) confirmAddAliasKeywordBtn.onclick = handleConfirmAddKeyword;
+
     // Initialize button state
     updateGenerateButtonState();
     
@@ -62,6 +123,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const emptyLeft = document.getElementById('explainer-empty-left');
     if (emptyLeft) emptyLeft.style.display = 'none';
     
+    // --- SEARCH LOGIC WITH ALIASES ---
     async function searchForExplainer() {
         const keyword = explainerKeyword.value.trim();
         const emptyLeft = document.getElementById('explainer-empty-left');
@@ -86,46 +148,100 @@ document.addEventListener('DOMContentLoaded', function() {
             resultsCount.style.display = 'block';
             resultsCount.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;"></div> <span>Searching...</span></div>';
             
-            const response = await fetch('/api/gdd/explainer/search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ keyword: keyword })
-            });
+            // Check for aliases first
+            let searchKeywords = [keyword];
+            await loadAliases(); // Ensure keywords are loaded
             
-            const result = await response.json();
+            const foundAliasKW = aliasState.keywords.find(kw => 
+                kw.aliases.some(a => a.name.toLowerCase() === keyword.toLowerCase())
+            );
             
-            if (!result.success) {
-                resultsCount.textContent = result.status_msg || "Search failed.";
-                resultsCount.style.color = "var(--status-error)";
+            if (foundAliasKW) {
+                console.log(`Found alias for "${keyword}" -> Primary keyword: "${foundAliasKW.name}"`);
+                searchKeywords.push(foundAliasKW.name);
+                resultsCount.innerHTML = `<div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;"></div> <span>Searching for "${keyword}" and "${foundAliasKW.name}"...</span></div>`;
+            }
+
+            // Execute search for each keyword and merge results
+            let allChoices = [];
+            let allStoreData = [];
+            let mergedKeys = new Set();
+
+            for (const kw of searchKeywords) {
+                const response = await fetch('/api/gdd/explainer/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keyword: kw })
+                });
+                const result = await response.json();
+                
+                if (result.success && result.choices) {
+                    result.choices.forEach((choice, idx) => {
+                        const storeItem = result.store_data[idx];
+                        const key = `${storeItem.doc_id}:${storeItem.section_heading}`;
+                        if (!mergedKeys.has(key)) {
+                            mergedKeys.add(key);
+                            allChoices.push(choice);
+                            allStoreData.push(storeItem);
+                        }
+                    });
+                }
+            }
+
+            if (allChoices.length === 0) {
+                // Show "No results" with "Search Deeper?" option
+                resultsCount.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span>No results found.</span>
+                        <button id="deep-search-btn" class="btn-secondary" style="height: 28px; padding: 0 12px; font-size: 0.75rem;">
+                            Search Deeper?
+                        </button>
+                    </div>
+                `;
+                resultsCount.style.color = "var(--muted-foreground)";
                 explainerResultsContainer.style.display = 'flex';
                 if (emptyLeft) emptyLeft.style.display = 'none';
                 renderCheckboxes([]);
                 if (resultsCountNumber) resultsCountNumber.textContent = '0';
                 if (selectedCountBadge) selectedCountBadge.textContent = '0';
+                
+                // Attach deep search handler
+                const deepSearchBtn = document.getElementById('deep-search-btn');
+                if (deepSearchBtn) {
+                    deepSearchBtn.onclick = () => performDeepSearch(keyword);
+                }
                 return;
             }
             
-            storedResults = result.store_data || [];
+            storedResults = allStoreData;
             lastSearchKeyword = keyword;
-            
-            const choices = result.choices || [];
-            renderCheckboxes(choices);
             
             // Always show results container
             explainerResultsContainer.style.display = 'flex';
             if (emptyLeft) emptyLeft.style.display = 'none';
             
             // Update count display
-            const count = choices.length;
+            const count = allChoices.length;
             if (resultsCountNumber) resultsCountNumber.textContent = count.toString();
-            // Note: selectedCountBadge is updated by updateSelectAllNoneState, not here
+            
+            renderCheckboxes(allChoices);
             
             if (count > 0) {
                 resultsCount.textContent = `Found ${count} result(s)`;
                 resultsCount.style.color = "var(--muted-foreground)";
+                
+                // Show alias prompt if this was from deep search
+                if (deepSearchContext && deepSearchContext.originalKeyword && deepSearchContext.selectedKeyword) {
+                    // Delay slightly to let UI settle
+                    setTimeout(() => {
+                        showAddAliasPrompt(deepSearchContext.originalKeyword, deepSearchContext.selectedKeyword);
+                        deepSearchContext = null; // Clear after showing
+                    }, 500);
+                }
             } else {
                 resultsCount.textContent = "No results found.";
                 resultsCount.style.color = "var(--muted-foreground)";
+                deepSearchContext = null; // Clear if no results
             }
             
         } catch (error) {
@@ -140,6 +256,251 @@ document.addEventListener('DOMContentLoaded', function() {
             explainerSearchBtn.disabled = false;
             updateGenerateButtonState();
         }
+    }
+    
+    // Deep search functionality
+    async function performDeepSearch(originalKeyword) {
+        try {
+            explainerSearchBtn.disabled = true;
+            resultsCount.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;"></div> <span>Searching deeper with AI...</span></div>';
+            
+            const response = await fetch('/api/gdd/explainer/deep-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keyword: originalKeyword })
+            });
+            
+            const deepResult = await response.json();
+            
+            if (deepResult.error) {
+                resultsCount.textContent = `Error: ${deepResult.error}`;
+                resultsCount.style.color = "var(--status-error)";
+                return;
+            }
+            
+            const matchedKeywords = deepResult.matched_keywords || [];
+            
+            if (matchedKeywords.length === 0) {
+                resultsCount.textContent = "No matches found even with deep search. Try a different keyword.";
+                resultsCount.style.color = "var(--muted-foreground)";
+                return;
+            }
+            
+            // Show modal for user to select keyword
+            const selectedKeyword = await showKeywordSelectionModal(matchedKeywords, originalKeyword);
+            
+            if (selectedKeyword) {
+                // Store deep search context for alias prompt
+                deepSearchContext = {
+                    originalKeyword: originalKeyword,
+                    selectedKeyword: selectedKeyword
+                };
+                
+                // Perform normal search with selected keyword
+                explainerKeyword.value = selectedKeyword;
+                await searchForExplainer();
+                
+                // After search completes, show alias prompt if results were found
+                // This will be handled in searchForExplainer after results are displayed
+            } else {
+                deepSearchContext = null;
+                resultsCount.textContent = "Search cancelled.";
+                resultsCount.style.color = "var(--muted-foreground)";
+            }
+            
+        } catch (error) {
+            resultsCount.textContent = "Error in deep search: " + error.message;
+            resultsCount.style.color = "var(--status-error)";
+        } finally {
+            explainerSearchBtn.disabled = false;
+        }
+    }
+    
+    function showKeywordSelectionModal(keywords, originalKeyword) {
+        return new Promise((resolve) => {
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;';
+            
+            modal.innerHTML = `
+                <div class="modal-content" style="background: white; padding: 24px; border-radius: 8px; max-width: 500px; width: 90%; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                    <h3 style="font-size: 1rem; font-weight: 600; margin: 0 0 12px 0;">Did you mean one of these?</h3>
+                    <p style="font-size: 0.875rem; color: var(--muted-foreground); margin-bottom: 16px;">
+                        We found these keywords that might match "${originalKeyword}":
+                    </p>
+                    <div class="keyword-options" style="display: flex; flex-direction: column; gap: 8px; margin: 16px 0; max-height: 300px; overflow-y: auto;">
+                        ${keywords.map(kw => `
+                            <button class="keyword-option-btn" data-keyword="${kw}" style="padding: 12px; background: var(--bg-muted); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; text-align: left; transition: all 0.2s;">
+                                ${kw}
+                            </button>
+                        `).join('')}
+                    </div>
+                    <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;">
+                        <button class="cancel-btn btn-secondary" style="height: 36px; padding: 0 16px;">Cancel</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Add hover effects
+            const style = document.createElement('style');
+            style.textContent = `
+                .keyword-option-btn:hover {
+                    background: var(--primary) !important;
+                    color: white !important;
+                    border-color: var(--primary) !important;
+                }
+            `;
+            document.head.appendChild(style);
+            
+            modal.querySelectorAll('.keyword-option-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const keyword = btn.dataset.keyword;
+                    document.body.removeChild(modal);
+                    document.head.removeChild(style);
+                    resolve(keyword);
+                });
+            });
+            
+            modal.querySelector('.cancel-btn').addEventListener('click', () => {
+                document.body.removeChild(modal);
+                document.head.removeChild(style);
+                resolve(null);
+            });
+            
+            // Close on backdrop click
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    document.body.removeChild(modal);
+                    document.head.removeChild(style);
+                    resolve(null);
+                }
+            });
+        });
+    }
+    
+    // Show add alias prompt after deep search
+    function showAddAliasPrompt(originalKeyword, selectedKeyword) {
+        // Create a popup card on the right side (in explanation area)
+        const explanationOutput = document.getElementById('explanation-output');
+        if (!explanationOutput) return;
+        
+        // Check if there's already a prompt
+        const existingPrompt = document.getElementById('add-alias-prompt');
+        if (existingPrompt) {
+            existingPrompt.remove();
+        }
+        
+        // Create prompt card
+        const promptCard = document.createElement('div');
+        promptCard.id = 'add-alias-prompt';
+        promptCard.style.cssText = `
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-width: 320px;
+            z-index: 100;
+        `;
+        
+        promptCard.innerHTML = `
+            <div style="display: flex; align-items: flex-start; gap: 12px;">
+                <div style="flex: 1;">
+                    <h4 style="font-size: 0.875rem; font-weight: 600; margin: 0 0 8px 0; color: var(--text-main);">
+                        Add Alias?
+                    </h4>
+                    <p style="font-size: 0.75rem; color: var(--muted-foreground); margin: 0 0 12px 0; line-height: 1.4;">
+                        Would you like to add <strong>"${originalKeyword}"</strong> as an alias for <strong>"${selectedKeyword}"</strong>?
+                    </p>
+                    <div style="display: flex; gap: 8px;">
+                        <button id="confirm-add-alias-btn" class="btn-primary" style="height: 32px; padding: 0 12px; font-size: 0.75rem; flex: 1;">
+                            Yes, Add
+                        </button>
+                        <button id="dismiss-alias-prompt-btn" class="btn-secondary" style="height: 32px; padding: 0 12px; font-size: 0.75rem;">
+                            No
+                        </button>
+                    </div>
+                </div>
+                <button id="close-alias-prompt-btn" class="action-btn" style="padding: 4px; opacity: 0.5;">
+                    <img src="/static/icons/close.svg" width="14" height="14">
+                </button>
+            </div>
+        `;
+        
+        // Position relative to explanation bubble (right side panel)
+        const explanationBubble = explanationOutput.closest('.explainer-bubble');
+        if (explanationBubble) {
+            // Ensure parent has relative positioning
+            if (getComputedStyle(explanationBubble).position === 'static') {
+                explanationBubble.style.position = 'relative';
+            }
+            explanationBubble.appendChild(promptCard);
+        } else {
+            // Fallback: append to explanation output
+            if (getComputedStyle(explanationOutput).position === 'static') {
+                explanationOutput.style.position = 'relative';
+            }
+            explanationOutput.appendChild(promptCard);
+        }
+        
+        // Add event listeners
+        const confirmBtn = promptCard.querySelector('#confirm-add-alias-btn');
+        const dismissBtn = promptCard.querySelector('#dismiss-alias-prompt-btn');
+        const closeBtn = promptCard.querySelector('#close-alias-prompt-btn');
+        
+        const removePrompt = () => {
+            promptCard.style.opacity = '0';
+            promptCard.style.transition = 'opacity 0.2s';
+            setTimeout(() => {
+                if (promptCard.parentNode) {
+                    promptCard.parentNode.removeChild(promptCard);
+                }
+            }, 200);
+        };
+        
+        confirmBtn.addEventListener('click', async () => {
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Adding...';
+            
+            try {
+                // Detect language of original keyword
+                const isVietnamese = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]/i.test(originalKeyword);
+                const language = isVietnamese ? 'vi' : 'en';
+                
+                const response = await fetch('/api/manage/aliases', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        keyword: selectedKeyword,
+                        alias: originalKeyword,
+                        language: language
+                    })
+                });
+                
+                if (response.ok) {
+                    confirmBtn.textContent = '✓ Added!';
+                    confirmBtn.style.background = 'var(--status-success)';
+                    setTimeout(removePrompt, 1000);
+                } else {
+                    const error = await response.json();
+                    alert('Error adding alias: ' + (error.error || 'Unknown error'));
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = 'Yes, Add';
+                }
+            } catch (error) {
+                alert('Error adding alias: ' + error.message);
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Yes, Add';
+            }
+        });
+        
+        dismissBtn.addEventListener('click', removePrompt);
+        closeBtn.addEventListener('click', removePrompt);
     }
     
     function renderCheckboxes(choices) {
@@ -294,13 +655,17 @@ document.addEventListener('DOMContentLoaded', function() {
             explanationOutput.innerHTML = `<div class="generated-explanation" style="color: var(--foreground)">${renderMarkdown(result.explanation || '', 'Explanation', keyword)}</div>`;
             
             // Source Chunks formatting
-            const chunks = result.source_chunks ? result.source_chunks.split('\n\n').filter(c => c.trim()) : [];
+            const chunks = result.source_chunks ? result.source_chunks.split('\n\n').filter(c => {
+                const trimmed = c.trim();
+                // Filter out the header "### Source Chunks (X chunks used)"
+                return trimmed && !trimmed.startsWith('### Source Chunks');
+            }) : [];
             if (chunksLabel) chunksLabel.textContent = `${chunks.length} chunks used`;
             
             chunksOutput.innerHTML = chunks.map((chunk, idx) => `
                 <div class="source-chunk-card">
                     <div style="font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); opacity: 0.8; margin-bottom: 6px;">CHUNK ${idx + 1}</div>
-                    <div style="font-size: 12px; line-height: 1.5; color: rgba(0,0,0,0.7);">${chunk.replace(/^Chunk \d+:?\s*/i, '')}</div>
+                    <div style="font-size: 12px; line-height: 1.5; color: rgba(0,0,0,0.7);">${chunk.replace(/^Chunk \d+:?\s*/i, '').replace(/^\*\*Chunk \d+\*\*.*?\n/i, '')}</div>
                 </div>
             `).join('');
 
@@ -482,6 +847,253 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         return html;
+    }
+
+    // --- ALIAS MANAGEMENT CORE FUNCTIONS ---
+    async function loadAliases() {
+        try {
+            const res = await fetch('/api/manage/aliases');
+            const data = await res.json();
+            aliasState.keywords = data.keywords || [];
+            renderAliases();
+        } catch (e) { console.error("Load aliases failed", e); }
+    }
+
+    async function saveAliases() {
+        try {
+            await fetch('/api/manage/aliases/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keywords: aliasState.keywords })
+            });
+        } catch (e) { console.error("Save aliases failed", e); }
+    }
+
+    function renderAliases() {
+        if (!aliasKeywordsList) return;
+
+        const s = aliasState;
+        let filtered = s.keywords.filter(kw => {
+            if (s.selectedLanguage && kw.language !== s.selectedLanguage) return false;
+            if (s.searchQuery.trim()) {
+                const query = s.searchQuery.toLowerCase();
+                const kwMatches = kw.name.toLowerCase().includes(query);
+                const aliasMatches = kw.aliases.some(a => a.name.toLowerCase().includes(query));
+                return kwMatches || aliasMatches;
+            }
+            return true;
+        });
+
+        // Alphabetical sorting in all three languages (English, Vietnamese, and general)
+        filtered.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+        if (aliasResultsStats) {
+            aliasResultsStats.textContent = `Results: ${filtered.length} of ${s.keywords.length} keywords`;
+        }
+
+        if (filtered.length === 0) {
+            aliasKeywordsList.innerHTML = `
+                <div class="flex flex-col items-center justify-center py-12 text-center opacity-40">
+                    <i class="icon-database" style="font-size: 40px; margin-bottom: 12px;"></i>
+                    <p style="font-size: 0.875rem;">
+                        ${s.searchQuery ? `No results for "${s.searchQuery}"` : "No keywords yet."}
+                    </p>
+                </div>
+            `;
+            return;
+        }
+
+        aliasKeywordsList.innerHTML = filtered.map(kw => {
+            const isExpanded = s.expandedKeywords.has(kw.id);
+            return `
+                <div class="alias-keyword-item" style="border-bottom: 1px solid var(--border);">
+                    <div class="keyword-header" onclick="window.toggleKeywordExpansion('${kw.id}')" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; cursor: pointer;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
+                            <i class="icon-chevron-right" style="font-size: 14px; transition: transform 0.2s; ${isExpanded ? 'transform: rotate(90deg);' : ''}"></i>
+                            <span style="font-weight: 500; font-size: 0.8125rem;" class="truncate">${kw.name}</span>
+                            <span style="font-size: 0.7rem; color: var(--muted-foreground);">(${kw.aliases.length})</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="badge badge-outline" style="font-size: 10px; padding: 1px 6px;">${kw.language}</span>
+                            <button class="action-btn text-destructive" onclick="event.stopPropagation(); window.handleDeleteKeyword('${kw.id}')" style="color: var(--status-error);">
+                                <i class="icon-trash-2" style="font-size: 14px;"></i>
+                            </button>
+                        </div>
+                    </div>
+                    ${isExpanded ? `
+                        <div class="alias-expanded-content animate-in" style="background: rgba(0,0,0,0.02); padding: 8px 12px 12px 32px; border-top: 1px solid var(--border);">
+                            <div class="alias-items-list" style="display: flex; flex-direction: column; gap: 2px;">
+                                ${kw.aliases.map(a => `
+                                    <div class="alias-item group" style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;">
+                                        <span style="color: var(--muted-foreground);">${a.name}</span>
+                                        <button class="action-btn opacity-0 group-hover:opacity-100" onclick="window.handleDeleteAlias('${kw.id}', '${a.id}')" style="padding: 2px; color: var(--status-error);">
+                                            <i class="icon-x" style="font-size: 12px;"></i>
+                                        </button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <div style="display: flex; gap: 6px; margin-top: 8px; pt-2; border-top: 1px solid rgba(0,0,0,0.05);">
+                                <input 
+                                    type="text" 
+                                    placeholder="Add new alias..." 
+                                    class="alias-input-field"
+                                    id="input-${kw.id}"
+                                    style="flex: 1; height: 28px; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--border); padding: 0 8px;"
+                                    onkeydown="if(event.key==='Enter') window.handleAddAlias('${kw.id}', this.value)"
+                                >
+                                <button class="btn-primary" onclick="window.handleAddAlias('${kw.id}', document.getElementById('input-${kw.id}').value)" style="height: 28px; padding: 0 8px;">
+                                    <i class="icon-plus" style="font-size: 14px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+    }
+
+    window.toggleKeywordExpansion = (id) => {
+        if (aliasState.expandedKeywords.has(id)) {
+            aliasState.expandedKeywords.delete(id);
+        } else {
+            aliasState.expandedKeywords.add(id);
+        }
+        renderAliases();
+    };
+
+    window.handleAddAlias = async (kwId, name) => {
+        if (!name.trim()) return;
+        const kw = aliasState.keywords.find(k => k.id === kwId);
+        if (!kw) return;
+        
+        if (kw.aliases.some(a => a.name.toLowerCase() === name.trim().toLowerCase())) {
+            alert("This alias already exists for this keyword");
+            return;
+        }
+        
+        try {
+            // Detect language
+            const isVietnamese = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]/i.test(name.trim());
+            const language = isVietnamese ? 'vi' : 'en';
+            
+            const response = await fetch('/api/manage/aliases', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    keyword: kw.name,
+                    alias: name.trim(),
+                    language: language
+                })
+            });
+            
+            if (response.ok) {
+                // Reload from server to get updated data
+                await loadAliases();
+            } else {
+                const error = await response.json();
+                alert('Error adding alias: ' + (error.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Error adding alias: ' + error.message);
+        }
+    };
+
+    window.handleDeleteAlias = async (kwId, aliasId) => {
+        const kw = aliasState.keywords.find(k => k.id === kwId);
+        if (!kw) return;
+        
+        const alias = kw.aliases.find(a => a.id === aliasId);
+        if (!alias) return;
+        
+        if (!confirm(`Delete alias "${alias.name}" for keyword "${kw.name}"?`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/manage/aliases', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    keyword: kw.name,
+                    alias: alias.name
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                // Remove from local state
+                kw.aliases = kw.aliases.filter(a => a.id !== aliasId);
+                renderAliases();
+                // Reload from server to ensure sync
+                await loadAliases();
+            } else {
+                alert('Error deleting alias: ' + (result.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Error deleting alias: ' + error.message);
+        }
+    };
+
+    window.handleDeleteKeyword = async (id) => {
+        const kw = aliasState.keywords.find(k => k.id === id);
+        if (!kw) return;
+        
+        if (!confirm(`Delete keyword "${kw.name}" and all its ${kw.aliases.length} alias(es)?`)) {
+            return;
+        }
+        
+        try {
+            // Delete all aliases for this keyword
+            const deletePromises = kw.aliases.map(alias => 
+                fetch('/api/manage/aliases', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        keyword: kw.name,
+                        alias: alias.name
+                    })
+                })
+            );
+            
+            await Promise.all(deletePromises);
+            
+            // Remove from local state
+            aliasState.keywords = aliasState.keywords.filter(k => k.id !== id);
+            aliasState.expandedKeywords.delete(id);
+            renderAliases();
+            
+            // Reload from server to ensure sync
+            await loadAliases();
+        } catch (error) {
+            alert('Error deleting keyword: ' + error.message);
+        }
+    };
+
+    function handleConfirmAddKeyword() {
+        const nameInput = document.getElementById('new-alias-keyword-name');
+        const name = nameInput.value.trim();
+        const lang = document.querySelector('.lang-select-btn.active').dataset.lang;
+        
+        if (!name) return;
+        
+        if (aliasState.keywords.some(k => k.name.toLowerCase() === name.toLowerCase())) {
+            alert("Keyword already exists");
+            return;
+        }
+
+        aliasState.keywords.push({
+            id: `keyword-${Date.now()}`,
+            name: name,
+            language: lang,
+            aliases: [],
+            createdAt: new Date().toISOString()
+        });
+        
+        saveAliases();
+        renderAliases();
+        addAliasKeywordDialog.classList.add('hidden');
+        nameInput.value = "";
     }
 });
 

@@ -13,18 +13,23 @@ except ImportError:
     OPENAI_AVAILABLE = False
     OpenAI = None
 
-# Get API key and base URL
-api_key = os.getenv('QWEN_API_KEY') or os.getenv('DASHSCOPE_API_KEY') or os.getenv('OPENAI_API_KEY')
+# Get API key and base URL - prioritize OpenAI
+# COMMENTED OUT: Qwen priority - using OpenAI first
+# api_key = os.getenv('QWEN_API_KEY') or os.getenv('DASHSCOPE_API_KEY') or os.getenv('OPENAI_API_KEY')
+api_key = os.getenv('OPENAI_API_KEY') or os.getenv('QWEN_API_KEY') or os.getenv('DASHSCOPE_API_KEY')
 if api_key and OPENAI_AVAILABLE:
     base_url = None
-    if os.getenv('QWEN_API_KEY') or os.getenv('DASHSCOPE_API_KEY'):
-        base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    # COMMENTED OUT: Qwen/DashScope endpoint
+    # if os.getenv('QWEN_API_KEY') or os.getenv('DASHSCOPE_API_KEY'):
+    #     base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     client = OpenAI(api_key=api_key, base_url=base_url)
 else:
     client = None
 
-# HYDE model
-_hyde_model = os.getenv('HYDE_MODEL', 'qwen-plus')
+# HYDE model - using OpenAI model
+# COMMENTED OUT: Qwen model default
+# _hyde_model = os.getenv('HYDE_MODEL', 'qwen-plus')
+_hyde_model = os.getenv('HYDE_MODEL', 'gpt-4o-mini')
 
 # HYDE System Prompt (adapted for general document search)
 HYDE_SYSTEM_PROMPT = '''You are a document search query rewriter for a RAG system.
@@ -106,6 +111,7 @@ def hyde_expand_query(query: str) -> Tuple[str, Dict]:
     except Exception as e:
         # Fallback to original query on error
         return query, {"total_time": 0, "error": str(e)}
+
 
 
 

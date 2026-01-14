@@ -4,7 +4,9 @@ Follows unified_rag_app patterns with section-based chunk retrieval.
 EXACT COPY from keyword_extractor - only imports updated.
 """
 from typing import List, Dict, Optional, Any, Tuple
+import re
 from backend.storage.supabase_client import get_supabase_client
+from backend.storage.keyword_storage import list_keyword_documents
 from backend.services.search_service import keyword_search
 from backend.services.llm_provider import SimpleLLMProvider
 from backend.services.hyde_service import hyde_expand_query
@@ -205,32 +207,69 @@ def explain_keyword(
                 'error': None
             }
         
-        # Step 3: Select chunks for answer (use heuristic, but include more if needed)
-        # For section-based retrieval, we might want all chunks, but limit to reasonable number
-        selected_chunks = all_chunks[:10] if len(all_chunks) > 10 else all_chunks
+        # Step 3: Select chunks for answer
+        # Filter chunks by relevance - only include chunks that match the keyword
+        # This prevents irrelevant information from being included in the explanation
+        relevant_chunks = [c for c in all_chunks if c.get('relevance', 0.0) > 0.0]
         
-        # Step 4: Detect language
+        if relevant_chunks:
+            # Use only keyword-relevant chunks, sorted by relevance (descending) then by original order
+            relevant_chunks.sort(key=lambda x: (-x.get('relevance', 0.0), x.get('doc_id', ''), x.get('section_heading') or '', x.get('chunk_index', 0)))
+            selected_chunks = relevant_chunks
+        else:
+            # Fallback: if no keyword matches found, use first few chunks (user selected section, so include some context)
+            # But limit to prevent too much irrelevant information
+            selected_chunks = all_chunks[:5]
+        
+        # Step 4: Get document name mapping for citations
+        docs = list_keyword_documents()
+        doc_name_map = {}
+        for doc in docs:
+            doc_id = doc.get('doc_id')
+            if not doc_id:
+                continue
+            name = doc.get('name', doc_id)
+            # Extract filename (remove path, remove .pdf extension)
+            filename = name
+            if '\\' in filename or '/' in filename:
+                filename = filename.split('\\')[-1].split('/')[-1]
+            if filename.lower().endswith('.pdf'):
+                filename = filename[:-4]
+            doc_name_map[doc_id] = filename
+        
+        # Step 5: Detect language
         detected_language = detect_query_language(keyword)
         
-        # Step 5: Build prompt with chunk context
+        # Step 6: Build prompt with chunk context + citations
+        # IMPORTANT: Assign citation numbers sequentially (1, 2, 3...) to match source chunks display order
         chunk_texts_with_sections = []
-        for i, chunk in enumerate(selected_chunks):
+        citation_map = {}  # Maps citation_number -> {doc_id, doc_name, section_heading}
+        citation_number = 1
+        
+        for chunk in selected_chunks:
             # Skip chunks without required fields
             if not chunk.get('doc_id') or chunk.get('content') is None:
                 continue
-                
-            section_info = ""
-            section_heading = chunk.get('section_heading')
-            if section_heading:
-                section_info = f" [Section: {section_heading}]"
-            else:
-                section_info = " [No section]"
             
-            content = chunk.get('content', '') or ''
             doc_id = chunk.get('doc_id', '')
+            doc_name = doc_name_map.get(doc_id, doc_id)  # Get friendly filename
+            section_heading = chunk.get('section_heading')
             
+            # Assign sequential citation number (each chunk gets its own number)
+            current_citation = citation_number
+            citation_map[citation_number] = {
+                'doc_id': doc_id,
+                'doc_name': doc_name,
+                'section_heading': section_heading
+            }
+            citation_number += 1
+            
+            section_info = f" [Section: {section_heading}]" if section_heading else " [No section]"
+            content = chunk.get('content', '') or ''
+            
+            # Format: [Citation Number] [Chunk from doc_name [Section: X]]
             chunk_texts_with_sections.append(
-                f"[Chunk {i+1} from {doc_id}{section_info}]\n{content}"
+                f"[{current_citation}] [Chunk from {doc_name}{section_info}]\n{content}"
             )
         
         chunk_texts_enhanced = "\n\n".join(chunk_texts_with_sections)
@@ -241,15 +280,46 @@ def explain_keyword(
         else:
             language_instruction = "IMPORTANT: Respond in English. Your entire answer must be in English."
         
-        # Build prompt (following unified_rag pattern)
+        # Build prompt with new structured format
         prompt = f"""Based on the following document chunks, provide a detailed explanation for: {keyword}
 
 {language_instruction}
 
+FOCUS REQUIREMENT:
+- Focus ONLY on information directly related to: {keyword}
+- If a chunk does not contain information about {keyword}, skip it or state: "This chunk does not contain information about {keyword}."
+- Do NOT explain chunks that are irrelevant to the keyword query.
+- Only include information that is directly relevant to explaining {keyword}.
+
 Note:
 - The information may be spread across multiple chunks.
-- Synthesize information only when multiple chunks explicitly refer to the same feature, system, or concept.
-- If chunks reference specific sections, mention those section names in your explanation.
+- Each chunk MUST be output as a numbered section with the section name as the BOLDED heading, followed by a NEWLINE and paragraph explaining that chunk's content.
+- Format each section EXACTLY as follows:
+
+1. Section Title
+Paragraph content explaining the information from this chunk.
+
+2. Another Section Title
+Paragraph content explaining the information from this chunk.
+
+3. Third Section Title
+Paragraph content explaining the information from this chunk.
+
+OUTPUT FORMAT REQUIREMENTS:
+- Start each section with a number (1., 2., 3., etc.) followed by a space, then the section title.
+- The section title should be the section name from the chunk (remove hierarchical numbering like 4.2, a., i.).
+- After the section title, add a blank line, then write a paragraph explaining that chunk's content.
+- Each section must be separated by a blank line.
+- Do NOT combine multiple chunks into one section.
+- Only explain chunks that contain information relevant to {keyword}. Skip or briefly note chunks that are irrelevant.
+
+EXAMPLE OUTPUT FORMAT:
+1. Tank Stats
+The tank stats section displays the basic statistics of the tank. It includes the following attributes: HP, speed, rate of fire, and damage. Each statistic is presented using a progress bar.
+
+2. Tank Reference
+The document does not specify additional information regarding the tank stats in this section.
+
 
 STRICT RULES (NO HALLUCINATION):
 - Do NOT add design intent, balance reasoning, or gameplay purpose unless explicitly stated in the document.
@@ -274,10 +344,12 @@ OUTPUT STYLE:
 - Write in a neutral, factual, documentation-style tone.
 - Describe only documented behavior, conditions, states, values, or rules.
 - Do NOT add summaries that introduce new interpretations.
+- Use the same font, header and spacing in the answer generation
 - Prefer precise restatement over explanation.
+- Remove all hierarchical numbering (e.g., 4.2, a., i.) from section titles and keep only the title text and replace it with 1. , 2.  to n.  sequentially
 
 HIGHLIGHTING INSTRUCTIONS:
-- When a word or phrase is a keypoint that needs to be highlighted (important keywords, headings, or key concepts), wrap it with asterisks: *word* or *key phrase*
+- When a word or phrase is a keypoint that needs to be highlighted (important keywords,   headings, or key concepts), wrap it with asterisks: *word* or *key phrase*
 - Use this syntax for important terms, section names, or concepts that should stand out
 - Example: "The *damage* system calculates *critical hits* based on *weapon type*"
 
@@ -286,10 +358,16 @@ Chunks:
 """
 
 
-        # Step 6: Generate explanation using LLM
+        # Step 7: Generate explanation using LLM
         try:
             provider = SimpleLLMProvider()
             explanation = provider.llm(prompt, temperature=0.3)
+            
+            # Post-process: No automatic references section needed
+            # The new prompt instructs LLM to use citations only in section titles
+            # and explicitly states "Do NOT add a 'References' section"
+            # So we don't add references automatically anymore
+            
         except Exception as e:
             return {
                 'explanation': None,
@@ -306,6 +384,7 @@ Chunks:
             'language': detected_language,
             'hyde_timing': hyde_timing,
             'chunks_used': len(selected_chunks),
+            'citations': citation_map,  # Citation mapping for reference
             'error': None
         }
     

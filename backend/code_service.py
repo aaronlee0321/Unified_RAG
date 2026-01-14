@@ -302,25 +302,33 @@ except ImportError as e:
 
 # Import LLM providers
 # Import from local gdd_rag_backbone (now included in unified_rag_app)
-from gdd_rag_backbone.llm_providers import QwenProvider, make_embedding_func
+# COMMENTED OUT: Qwen usage - using OpenAI instead
+# from gdd_rag_backbone.llm_providers import QwenProvider, make_embedding_func
+from gdd_rag_backbone.llm_providers import make_embedding_func
 
 # Initialize OpenAI client for HYDE and answer generation
-api_key = os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("OPENAI_API_KEY")
+# COMMENTED OUT: Qwen priority - using OpenAI first
+# api_key = os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("OPENAI_API_KEY")
+api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")
 if not api_key:
-    raise ValueError("QWEN_API_KEY, DASHSCOPE_API_KEY, or OPENAI_API_KEY environment variable must be set")
+    raise ValueError("OPENAI_API_KEY environment variable must be set")
 
-# Use DashScope compatible base URL if using Qwen/DashScope
+# Use OpenAI endpoint (commented out DashScope/Qwen endpoint)
 base_url = None
-if os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY"):
-    base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-else:
-    base_url = None
+# COMMENTED OUT: Qwen/DashScope endpoint
+# if os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY"):
+#     base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+# else:
+#     base_url = None
 
 client = OpenAI(api_key=api_key, base_url=base_url)
 
-# Get LLM models from environment or use defaults
-_hyde_model = os.environ.get("HYDE_MODEL", "qwen-plus")
-_answer_model = os.environ.get("ANSWER_MODEL", "qwen-flash")
+# Get LLM models from environment or use defaults - using OpenAI models
+# COMMENTED OUT: Qwen models
+# _hyde_model = os.environ.get("HYDE_MODEL", "qwen-plus")
+# _answer_model = os.environ.get("ANSWER_MODEL", "qwen-flash")
+_hyde_model = os.environ.get("HYDE_MODEL", "gpt-4o-mini")
+_answer_model = os.environ.get("ANSWER_MODEL", "gpt-4o-mini")
 
 
 def parse_cs_file_filter(raw_query: str):
@@ -509,7 +517,17 @@ def generate_context_supabase(
     
     # Initialize provider if not provided
     if provider is None:
-        provider = QwenProvider()
+        # COMMENTED OUT: Qwen usage - using OpenAI instead
+        # provider = QwenProvider()
+        # Note: For embeddings, we still use make_embedding_func which may require Qwen
+        # For LLM calls, we use OpenAI client directly
+        from backend.services.llm_provider import SimpleLLMProvider
+        try:
+            provider = SimpleLLMProvider()
+        except:
+            # Fallback to Qwen if OpenAI not available (for embeddings)
+            from gdd_rag_backbone.llm_providers import QwenProvider
+            provider = QwenProvider()
     
     embedding_func = make_embedding_func(provider)
     
@@ -1183,7 +1201,10 @@ If no global variables are found in the provided class definitions, respond with
         # Use Supabase if available
         if SUPABASE_AVAILABLE:
             try:
-                provider = QwenProvider()
+                # COMMENTED OUT: Qwen usage - using OpenAI instead
+                # provider = QwenProvider()
+                from backend.services.llm_provider import SimpleLLMProvider
+                provider = SimpleLLMProvider()
                 
                 # Generate context
                 import logging

@@ -435,7 +435,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Clear chat button
     const clearChatBtn = document.getElementById('clear-chat-btn');
     if (clearChatBtn) {
-        clearChatBtn.addEventListener('click', function() {
+        clearChatBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
             try {
                 localStorage.removeItem(CHAT_STORAGE_KEY);
             } catch (e) {

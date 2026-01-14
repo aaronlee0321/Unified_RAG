@@ -96,7 +96,9 @@ def run_code_upload_pipeline_async(job_id, file_bytes, filename):
         # Import required functions
         from backend.code_service import _analyze_csharp_file_symbols
         from backend.storage.code_supabase_storage import index_code_chunks_to_supabase
-        from gdd_rag_backbone.llm_providers import QwenProvider
+        # COMMENTED OUT: Qwen usage - using OpenAI instead
+        # from gdd_rag_backbone.llm_providers import QwenProvider
+        from backend.services.llm_provider import SimpleLLMProvider
         import re
         
         # Use file name as file_path (relative path)
@@ -217,7 +219,9 @@ def run_code_upload_pipeline_async(job_id, file_bytes, filename):
         update_job(job_id, step="Indexing to Supabase")
         
         # Initialize provider
-        provider = QwenProvider()
+        # COMMENTED OUT: Qwen usage - using OpenAI instead
+        # provider = QwenProvider()
+        provider = SimpleLLMProvider()
         
         total_chunks = 0
         
@@ -261,6 +265,11 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# Data Directory
+DATA_DIR = PROJECT_ROOT / 'data'
+DATA_DIR.mkdir(exist_ok=True)
+# Note: ALIAS_DICT_PATH removed - aliases now stored in Supabase keyword_aliases table
 
 # Configuration
 CONFIG = {
@@ -814,6 +823,25 @@ def explainer_select_none():
         app.logger.error(f"Error in explainer select-none: {e}")
         return jsonify({'choices': []}), 500
 
+@app.route('/api/gdd/explainer/deep-search', methods=['POST'])
+def deep_search():
+    """Deep search with LLM translation and synonym generation"""
+    try:
+        from backend.services.deep_search_service import deep_search_keyword
+        
+        data = request.get_json()
+        keyword = data.get('keyword', '').strip()
+        
+        if not keyword:
+            return jsonify({'error': 'Keyword is required'}), 400
+        
+        result = deep_search_keyword(keyword)
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        app.logger.error(f"Error in deep search: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/code/query', methods=['POST'])
 def code_query():
     """Handle Code Q&A queries"""
@@ -1066,6 +1094,117 @@ def debug_supabase():
         diagnostics['traceback'] = traceback.format_exc()
     
     return jsonify(diagnostics)
+
+@app.route('/api/manage/aliases', methods=['GET'])
+def get_aliases():
+    """Get all aliases grouped by keyword (Supabase)"""
+    try:
+        from backend.storage.keyword_storage import list_aliases_grouped
+        from datetime import datetime
+        
+        grouped = list_aliases_grouped()
+        
+        # Convert to frontend format
+        keywords_list = list(grouped.values())
+        
+        return jsonify({
+            'keywords': keywords_list,
+            'lastUpdated': datetime.now().isoformat()
+        })
+    except Exception as e:
+        import traceback
+        app.logger.error(f"Error getting aliases: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/manage/aliases', methods=['POST'])
+def add_alias():
+    """Add a new alias for a keyword (Supabase)"""
+    try:
+        from backend.storage.keyword_storage import insert_alias
+        
+        data = request.get_json()
+        keyword = data.get('keyword', '').strip()
+        alias = data.get('alias', '').strip()
+        language = data.get('language', 'en')
+        
+        if not keyword or not alias:
+            return jsonify({'error': 'Keyword and alias are required'}), 400
+        
+        result = insert_alias(keyword, alias, language)
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        app.logger.error(f"Error adding alias: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/manage/aliases', methods=['DELETE'])
+def remove_alias():
+    """Delete an alias (Supabase)"""
+    try:
+        from backend.storage.keyword_storage import delete_alias
+        
+        data = request.get_json()
+        keyword = data.get('keyword', '').strip()
+        alias = data.get('alias', '').strip()
+        
+        if not keyword or not alias:
+            return jsonify({'error': 'Keyword and alias are required'}), 400
+        
+        success = delete_alias(keyword, alias)
+        return jsonify({'success': success})
+    except Exception as e:
+        import traceback
+        app.logger.error(f"Error deleting alias: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/manage/aliases/save', methods=['POST'])
+def save_aliases():
+    """Save aliases (Supabase) - handles bulk updates from frontend"""
+    try:
+        from backend.storage.keyword_storage import insert_alias, delete_alias
+        from datetime import datetime
+        
+        data = request.get_json()
+        if not data or 'keywords' not in data:
+            return jsonify({'error': 'Invalid data'}), 400
+        
+        # The frontend sends the full keyword structure with aliases
+        # We need to sync it with Supabase
+        keywords = data.get('keywords', [])
+        
+        # Get current state from Supabase
+        from backend.storage.keyword_storage import list_aliases_grouped
+        current_grouped = list_aliases_grouped()
+        
+        # For simplicity, we'll just add new aliases and keywords
+        # Frontend should handle deletions via DELETE endpoint
+        for kw in keywords:
+            keyword_name = kw.get('name', '').strip()
+            language = kw.get('language', 'en').lower()
+            aliases = kw.get('aliases', [])
+            
+            if not keyword_name:
+                continue
+            
+            # Add each alias
+            for alias_obj in aliases:
+                alias_name = alias_obj.get('name', '').strip()
+                if alias_name:
+                    try:
+                        insert_alias(keyword_name, alias_name, language)
+                    except Exception as e:
+                        # Ignore duplicate errors (UNIQUE constraint)
+                        if 'duplicate' not in str(e).lower() and 'unique' not in str(e).lower():
+                            app.logger.warning(f"Could not insert alias {alias_name} for {keyword_name}: {e}")
+        
+        return jsonify({
+            'status': 'success',
+            'lastUpdated': datetime.now().isoformat()
+        })
+    except Exception as e:
+        import traceback
+        app.logger.error(f"Error saving aliases: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 def health():

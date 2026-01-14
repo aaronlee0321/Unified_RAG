@@ -310,6 +310,62 @@ main {
     transform: translateX(0);
 }
 
+/* Alias Drawer Utilities */
+.alias-keyword-item:hover .keyword-header {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.alias-item:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.alias-item .action-btn {
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.alias-item:hover .action-btn {
+    opacity: 1;
+}
+
+.text-destructive {
+    color: var(--status-error) !important;
+}
+
+.badge-btn {
+    background: white;
+    border: 1px solid var(--border);
+    transition: all 0.2s;
+}
+
+.badge-btn.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+/* Filter Tag Style (Green) */
+.filter-tag {
+    font-size: 0.75rem; /* text-xs */
+    padding: 2px 8px; /* px-2 py-0.5 */
+    border-radius: 4px; /* rounded */
+    border: 1px solid transparent;
+    background: #f1f5f9; /* default gray bg */
+    color: #475569;
+    transition: all 0.2s;
+    font-weight: 500;
+}
+
+.filter-tag:hover {
+    background: #e2e8f0;
+}
+
+.filter-tag.active {
+    background: #dcfce7; /* bg-green-100 */
+    color: #15803d; /* text-green-700 */
+    border-color: #bbf7d0;
+}
+
 /* Sidebar Header/Search */
 .sidebar h2 {
     font-family: var(--font-heading);
@@ -370,6 +426,98 @@ main {
     font-size: 0.75rem;
     font-weight: 600;
     text-transform: lowercase;
+}
+
+/* Manage Aliases Styles */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: transparent;
+}
+
+.badge-outline {
+    border-color: var(--border);
+    color: var(--muted-foreground);
+}
+
+.badge-default {
+    background: var(--primary);
+    color: white;
+    border: none;
+}
+
+.alias-row {
+    transition: all 0.2s ease;
+}
+
+.alias-row:hover {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.keyword-item {
+    border-radius: var(--radius-md);
+    transition: background 0.2s;
+}
+
+.keyword-item:hover {
+    background: var(--muted);
+}
+
+.alias-list {
+    margin-left: 24px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: var(--radius-md);
+}
+
+.animate-in {
+    animation: fadeIn 0.2s ease-out forwards;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.rotate-90 {
+    transform: rotate(90deg);
+}
+
+.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Dialog Mockup Styles */
+.dialog-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+}
+
+.dialog-content {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: var(--shadow-lg);
+}
+
+.scroll-area {
+    overflow-y: auto;
+    max-height: 500px;
 }
 
 .ext-ts, .ext-tsx { background: rgba(59, 130, 246, 0.1); color: #2563eb; }
@@ -762,6 +910,7 @@ main {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    position: relative; /* Required for absolute positioning of drawer */
 }
 
 .explainer-layout {

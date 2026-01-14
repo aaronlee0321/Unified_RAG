@@ -407,8 +407,12 @@ def upload_and_index_document_bytes(pdf_bytes: bytes, original_filename: str, pr
 
     # 5) Embedding
     bump("Generating embeddings")
+    # COMMENTED OUT: Qwen usage - using OpenAI instead (for embeddings, may still need Qwen)
+    # from gdd_rag_backbone.llm_providers import QwenProvider
+    # provider = QwenProvider()
+    # Note: For embeddings, we still use make_embedding_func which may require Qwen
     from gdd_rag_backbone.llm_providers import QwenProvider
-    provider = QwenProvider()
+    provider = QwenProvider()  # Still needed for embeddings
 
     # 6) Index
     bump("Indexing into Supabase")
@@ -916,7 +920,10 @@ def query_gdd_documents(query: str, selected_doc: str = None):
         
         # Create provider and query
         try:
-            provider = QwenProvider()
+            # COMMENTED OUT: Qwen usage - using OpenAI instead
+            # provider = QwenProvider()
+            from backend.services.llm_provider import SimpleLLMProvider
+            provider = SimpleLLMProvider()
         except Exception as e:
             return {
                 'response': f'Error: Could not initialize LLM provider. Please check your API key in .env file.\n\nError: {str(e)}',
