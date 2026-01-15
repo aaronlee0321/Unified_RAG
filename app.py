@@ -316,6 +316,33 @@ app.logger.info("=" * 60)
 app.logger.info("Flask app initializing...")
 app.logger.info(f"Project root: {PROJECT_ROOT}")
 
+# Log PORT environment variable (critical for Render)
+port_env = os.getenv('PORT')
+app.logger.info(f"PORT environment variable: {port_env if port_env else 'NOT SET (will use default 5000)'}")
+app.logger.info(f"Python version: {sys.version}")
+
+# Initialize service availability flags
+gdd_service_available = False
+code_service_available = False
+
+# Add health check endpoint early (before other routes)
+@app.route('/health', methods=['GET'])
+@app.route('/healthz', methods=['GET'])
+def health_check():
+    """Health check endpoint for Render and monitoring"""
+    try:
+        return jsonify({
+            'status': 'healthy',
+            'service': 'unified_rag_app',
+            'gdd_service': gdd_service_available,
+            'code_service': code_service_available
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
 # Check Supabase configuration
 supabase_url = os.getenv('SUPABASE_URL')
 supabase_key = os.getenv('SUPABASE_KEY')
@@ -1288,6 +1315,28 @@ def log_all_routes():
 
 # Log routes after all are defined
 log_all_routes()
+
+# Final validation - ensure app can start
+try:
+    app.logger.info("=" * 60)
+    app.logger.info("App initialization complete")
+    app.logger.info(f"App name: {app.name}")
+    app.logger.info(f"App debug mode: {app.debug}")
+    app.logger.info(f"GDD service available: {gdd_service_available if 'gdd_service_available' in globals() else 'Unknown'}")
+    app.logger.info(f"Code service available: {code_service_available if 'code_service_available' in globals() else 'Unknown'}")
+    app.logger.info("=" * 60)
+    app.logger.info("✅ App is ready to serve requests")
+    app.logger.info("=" * 60)
+except Exception as e:
+    import sys
+    import traceback
+    app.logger.error("=" * 60)
+    app.logger.error(f"[FATAL] App validation failed: {e}")
+    app.logger.error(f"Traceback:\n{traceback.format_exc()}")
+    app.logger.error("=" * 60)
+    print(f"[FATAL] App validation failed: {e}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    # Don't raise - let gunicorn handle it
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))

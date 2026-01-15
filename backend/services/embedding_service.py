@@ -55,7 +55,9 @@ def embed_document_chunks(doc_id: str, model: Optional[str] = None, batch_size: 
         # Embedding not configured; silently skip
         return 0
 
-    embedding_model = model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    # Use DEFAULT_EMBEDDING_MODEL from config, fallback to EMBEDDING_MODEL env var, then default
+    from backend.shared.config import DEFAULT_EMBEDDING_MODEL
+    embedding_model = model or os.getenv("EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL
 
     # Fetch chunks without embeddings (or re-embed all)
     # Note: Supabase python client doesn't support vector IS NULL directly; fetch content+ids

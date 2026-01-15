@@ -25,7 +25,7 @@ REGION = os.getenv('REGION', 'intl')
 
 # Model configuration
 DEFAULT_LLM_MODEL = os.getenv('DEFAULT_LLM_MODEL', 'qwen-plus')
-DEFAULT_EMBEDDING_MODEL = os.getenv('DEFAULT_EMBEDDING_MODEL', 'text-embedding-v4')
+DEFAULT_EMBEDDING_MODEL = os.getenv('DEFAULT_EMBEDDING_MODEL', 'text-embedding-3-small')
 
 # Chunking configuration (for keyword extractor backend)
 CHUNK_SIZE = int(os.getenv('CHUNK_SIZE', 500))
