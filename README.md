@@ -380,43 +380,13 @@ OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz1234567890
 
 Run the following SQL scripts in your Supabase SQL Editor:
 
-#### **a) GDD Documents Tables**
+#### **a) Keyword Documents Tables**
+
+**Note:** These tables are used by BOTH Keyword Finder and GDD RAG features. 
+You do NOT need separate `gdd_documents` or `gdd_chunks` tables.
 
 ```sql
--- GDD documents table
-CREATE TABLE IF NOT EXISTS gdd_documents (
-    id SERIAL PRIMARY KEY,
-    doc_id TEXT UNIQUE NOT NULL,
-    name TEXT NOT NULL,
-    file_path TEXT,
-    pdf_storage_path TEXT,
-    markdown_storage_path TEXT,
-    full_text TEXT,
-    status TEXT DEFAULT 'indexed',
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- GDD chunks table
-CREATE TABLE IF NOT EXISTS gdd_chunks (
-    id SERIAL PRIMARY KEY,
-    doc_id TEXT NOT NULL REFERENCES gdd_documents(doc_id) ON DELETE CASCADE,
-    chunk_id TEXT UNIQUE NOT NULL,
-    content TEXT NOT NULL,
-    section_heading TEXT,
-    chunk_index INTEGER,
-    embedding vector(1536),
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Create indexes
-CREATE INDEX IF NOT EXISTS idx_gdd_chunks_doc_id ON gdd_chunks(doc_id);
-CREATE INDEX IF NOT EXISTS idx_gdd_chunks_embedding ON gdd_chunks USING ivfflat (embedding vector_cosine_ops);
-```
-
-#### **b) Keyword Documents Tables**
-
-```sql
--- Keyword documents table (for Keyword Finder)
+-- Keyword documents table (used by both Keyword Finder and GDD RAG)
 CREATE TABLE IF NOT EXISTS keyword_documents (
     id SERIAL PRIMARY KEY,
     doc_id TEXT UNIQUE NOT NULL,
@@ -427,7 +397,7 @@ CREATE TABLE IF NOT EXISTS keyword_documents (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Keyword chunks table
+-- Keyword chunks table (used by both Keyword Finder and GDD RAG)
 CREATE TABLE IF NOT EXISTS keyword_chunks (
     id SERIAL PRIMARY KEY,
     doc_id TEXT NOT NULL REFERENCES keyword_documents(doc_id) ON DELETE CASCADE,
@@ -435,8 +405,13 @@ CREATE TABLE IF NOT EXISTS keyword_chunks (
     content TEXT NOT NULL,
     section_heading TEXT,
     chunk_index INTEGER,
+    embedding vector(1536),  -- Vector embeddings for semantic search (GDD RAG)
     created_at TIMESTAMP DEFAULT NOW()
 );
+
+-- Vector similarity index for embeddings (required for GDD RAG)
+CREATE INDEX IF NOT EXISTS idx_keyword_chunks_embedding 
+    ON keyword_chunks USING ivfflat (embedding vector_cosine_ops);
 
 -- Full-text search indexes
 CREATE INDEX IF NOT EXISTS idx_keyword_chunks_content_fts 
@@ -447,7 +422,7 @@ CREATE INDEX IF NOT EXISTS idx_keyword_documents_name_fts
     ON keyword_documents USING gin(to_tsvector('english', name));
 ```
 
-#### **c) Keyword Aliases Table**
+#### **b) Keyword Aliases Table**
 
 ```sql
 -- Keyword aliases table (for bilingual synonym mapping)
@@ -466,7 +441,7 @@ CREATE INDEX IF NOT EXISTS idx_keyword_aliases_alias ON keyword_aliases(alias);
 CREATE INDEX IF NOT EXISTS idx_keyword_aliases_language ON keyword_aliases(language);
 ```
 
-#### **d) Code Files Tables**
+#### **c) Code Files Tables**
 
 ```sql
 -- Code files table
@@ -499,7 +474,7 @@ CREATE INDEX IF NOT EXISTS idx_code_chunks_type ON code_chunks(chunk_type);
 CREATE INDEX IF NOT EXISTS idx_code_chunks_class ON code_chunks(class_name);
 ```
 
-#### **e) Create Search Function**
+#### **d) Create Search Function**
 
 ```sql
 -- Keyword search function for full-text search
