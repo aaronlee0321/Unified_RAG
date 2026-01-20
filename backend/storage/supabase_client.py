@@ -249,14 +249,16 @@ def vector_search_code_chunks(
 def insert_gdd_document(doc_id: str, name: str, file_path: Optional[str] = None, file_size: Optional[int] = None, markdown_content: Optional[str] = None, pdf_storage_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Insert or update a GDD document.
+    Uses keyword_documents table (shared with Keyword Finder feature).
     
     Args:
         doc_id: Unique document ID
         name: Document name
         file_path: Optional file path (for reference, not used for reading)
         file_size: Optional file size in bytes
-        markdown_content: Optional full markdown content (stored in Supabase)
+        markdown_content: Optional full markdown content (stored as full_text in keyword_documents)
         pdf_storage_path: Optional PDF filename in Supabase Storage (gdd_pdfs bucket)
+                      Note: This is stored in file_path if pdf_storage_path is provided
     
     Returns:
         Inserted/updated document data
@@ -264,22 +266,18 @@ def insert_gdd_document(doc_id: str, name: str, file_path: Optional[str] = None,
     try:
         client = get_supabase_client(use_service_key=True)
         
+        # Use keyword_documents table (shared table for both Keyword Finder and GDD RAG)
+        # Map markdown_content to full_text (keyword_documents uses full_text)
+        # Use pdf_storage_path as file_path if provided, otherwise use file_path parameter
         doc_data = {
             'doc_id': doc_id,
             'name': name,
-            'file_path': file_path,
-            'file_size': file_size
+            'file_path': pdf_storage_path if pdf_storage_path else file_path,
+            'file_size': file_size,
+            'full_text': markdown_content  # Store markdown_content as full_text
         }
         
-        # Add markdown_content if provided
-        if markdown_content is not None:
-            doc_data['markdown_content'] = markdown_content
-        
-        # Add pdf_storage_path if provided
-        if pdf_storage_path is not None:
-            doc_data['pdf_storage_path'] = pdf_storage_path
-        
-        result = client.table('gdd_documents').upsert(doc_data, on_conflict='doc_id').execute()
+        result = client.table('keyword_documents').upsert(doc_data, on_conflict='doc_id').execute()
         
         return result.data[0] if result.data else {}
     except Exception as e:
@@ -288,14 +286,17 @@ def insert_gdd_document(doc_id: str, name: str, file_path: Optional[str] = None,
 def insert_gdd_chunks(chunks: List[Dict[str, Any]]) -> int:
     """
     Insert GDD chunks with embeddings into Supabase.
+    Uses keyword_chunks table (shared with Keyword Finder feature).
     
     Args:
         chunks: List of chunk dictionaries with keys:
             - chunk_id: Unique chunk ID
             - doc_id: Document ID
             - content: Chunk content
-            - embedding: Vector embedding (1024 dimensions)
-            - metadata: Optional metadata dict
+            - embedding: Vector embedding (dimensions vary by model)
+            - section_heading: Optional section heading (maps to section_heading in keyword_chunks)
+            - chunk_index: Optional chunk index
+            - metadata: Optional metadata dict (stored as JSONB if supported)
     
     Returns:
         Number of chunks inserted
@@ -329,31 +330,56 @@ def insert_gdd_chunks(chunks: List[Dict[str, Any]]) -> int:
                 except (ValueError, TypeError):
                     print(f"Warning: Could not convert embedding to floats for chunk {chunk.get('chunk_id')}, skipping")
                     continue
+                
+                # Pad embeddings to match database schema (1536 dimensions)
+                # Database expects vector(1536) but some models produce different dimensions:
+                # - OpenAI text-embedding-3-small: 1536
+                # - OpenAI text-embedding-3-large: 3072
+                # - Gemini text-embedding-004: 768
+                # - Ollama mxbai-embed-large: 1024
+                # - Ollama nomic-embed-text: 768
+                expected_dim = 1536  # keyword_chunks table uses vector(1536)
+                current_dim = len(embedding)
+                
+                if current_dim < expected_dim:
+                    # Pad with zeros to match expected dimension
+                    padding_needed = expected_dim - current_dim
+                    embedding = embedding + [0.0] * padding_needed
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.debug(f"Padded embedding from {current_dim} to {expected_dim} dimensions for chunk {chunk.get('chunk_id')}")
+                elif current_dim > expected_dim:
+                    # Truncate if larger (shouldn't happen, but handle it)
+                    embedding = embedding[:expected_dim]
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Truncated embedding from {current_dim} to {expected_dim} dimensions for chunk {chunk.get('chunk_id')}")
             
                         
+            # Map to keyword_chunks table schema:
+            # - chunk_id, doc_id, content, embedding, section_heading, chunk_index
             record = {
                 'chunk_id': chunk['chunk_id'],
                 'doc_id': chunk['doc_id'],
                 'content': chunk['content'],
                 'embedding': embedding,  # list[float] or None
-                'metadata': chunk.get('metadata', {})
             }
-
-            # Forward section-aware columns when provided by gdd_supabase_storage.py
-            optional_cols = [
-                'section_path',
-                'section_title',
-                'subsection_title',
-                'section_index',
-                'paragraph_index',
-                'content_type',
-                'doc_category',
-                'tags',
-            ]
-
-            for col in optional_cols:
-                if col in chunk:
-                    record[col] = chunk.get(col)
+            
+            # Map section_heading if available (keyword_chunks has section_heading field)
+            if 'section_heading' in chunk:
+                record['section_heading'] = chunk['section_heading']
+            elif 'section_title' in chunk:
+                record['section_heading'] = chunk['section_title']
+            elif 'subsection_title' in chunk:
+                record['section_heading'] = chunk['subsection_title']
+            
+            # Map chunk_index if available
+            if 'chunk_index' in chunk:
+                record['chunk_index'] = chunk['chunk_index']
+            elif 'section_index' in chunk:
+                record['chunk_index'] = chunk['section_index']
+            elif 'paragraph_index' in chunk:
+                record['chunk_index'] = chunk['paragraph_index']
 
             records.append(record)
 
@@ -364,7 +390,8 @@ def insert_gdd_chunks(chunks: List[Dict[str, Any]]) -> int:
         
         for i in range(0, len(records), batch_size):
             batch = records[i:i + batch_size]
-            result = client.table('gdd_chunks').upsert(
+            # Use keyword_chunks table (shared with Keyword Finder feature)
+            result = client.table('keyword_chunks').upsert(
                 batch,
                 on_conflict='chunk_id'
             ).execute()
@@ -459,6 +486,7 @@ def insert_code_chunks(chunks: List[Dict[str, Any]]) -> int:
 def get_gdd_documents() -> List[Dict[str, Any]]:
     """
     Get all GDD documents.
+    Uses keyword_documents table (shared with Keyword Finder feature).
     
     Returns:
         List of document dictionaries
@@ -470,9 +498,9 @@ def get_gdd_documents() -> List[Dict[str, Any]]:
         logger.info("get_gdd_documents() called")
         logger.info("Getting Supabase client...")
         client = get_supabase_client()
-        logger.info("Supabase client obtained, querying gdd_documents table...")
+        logger.info("Supabase client obtained, querying keyword_documents table...")
         
-        result = client.table('gdd_documents').select('*').order('name').execute()
+        result = client.table('keyword_documents').select('*').order('name').execute()
         logger.info(f"Query executed, received {len(result.data) if result.data else 0} documents")
         
         if result.data and len(result.data) > 0:
@@ -489,6 +517,7 @@ def get_gdd_documents() -> List[Dict[str, Any]]:
 def get_gdd_document_markdown(doc_id: str) -> Optional[str]:
     """
     Get full markdown content for a GDD document from Supabase.
+    Uses keyword_documents table (markdown stored as full_text).
     
     Args:
         doc_id: Document ID
@@ -498,10 +527,11 @@ def get_gdd_document_markdown(doc_id: str) -> Optional[str]:
     """
     try:
         client = get_supabase_client()
-        result = client.table('gdd_documents').select('markdown_content').eq('doc_id', doc_id).limit(1).execute()
+        # keyword_documents stores markdown as full_text
+        result = client.table('keyword_documents').select('full_text').eq('doc_id', doc_id).limit(1).execute()
         
         if result.data and len(result.data) > 0:
-            return result.data[0].get('markdown_content')
+            return result.data[0].get('full_text')
         return None
     except Exception as e:
         import logging
@@ -567,7 +597,7 @@ def get_gdd_document_pdf_url(doc_id: str) -> Optional[str]:
         client = get_supabase_client()
         bucket_name = 'gdd_pdfs'
         
-        # Get pdf_storage_path from database (try keyword_documents first, fallback to gdd_documents)
+        # Get pdf_storage_path from database (uses keyword_documents table)
         stored_filename = None
         result = None
         try:
@@ -578,14 +608,11 @@ def get_gdd_document_pdf_url(doc_id: str) -> Optional[str]:
                 # If file_path is a full path, extract just the filename
                 if '/' in stored_filename or '\\' in stored_filename:
                     stored_filename = stored_filename.replace('\\', '/').split('/')[-1]
-        except:
-            # Fallback to gdd_documents if keyword_documents doesn't have the field
-            try:
-                result = client.table('gdd_documents').select('pdf_storage_path').eq('doc_id', doc_id).limit(1).execute()
-                if result and result.data:
-                    stored_filename = result.data[0].get('pdf_storage_path')
-            except:
-                pass
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Could not get file_path for doc_id {doc_id}: {e}")
+            pass
         
         # List all files in the bucket to verify existence (use service key for listing)
         try:
@@ -675,8 +702,9 @@ def delete_gdd_document(doc_id: str) -> bool:
     """
     try:
         client = get_supabase_client(use_service_key=True)
-        # Cascade delete will remove chunks automatically
-        result = client.table('gdd_documents').delete().eq('doc_id', doc_id).execute()
+        # Cascade delete will remove chunks automatically (from keyword_chunks table)
+        # Uses keyword_documents table (shared with Keyword Finder feature)
+        result = client.table('keyword_documents').delete().eq('doc_id', doc_id).execute()
         return True
     except Exception as e:
         raise Exception(f"Error deleting GDD document: {e}")

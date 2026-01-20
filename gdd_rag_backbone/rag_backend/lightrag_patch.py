@@ -13,6 +13,13 @@ import os
 def patch_lightrag():
     """Patch lightrag module to export LightRAG and QueryParam."""
     try:
+        # Check if lightrag is available (may not be installed on Python 3.9)
+        try:
+            import lightrag
+        except ImportError:
+            print("[PATCH] Warning: lightrag not installed. RAGAnything features will not be available.")
+            print("[PATCH] To use RAGAnything, upgrade to Python 3.10+ and install: pip install lightrag lightrag-hku")
+            return
         # First, patch utils to add missing get_env_value
         try:
             import lightrag.utils as utils_module

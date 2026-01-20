@@ -52,14 +52,19 @@ class QwenProvider(LlmProvider, EmbeddingProvider):
                 "or api_key must be provided"
             )
         
-        # Set DashScope API key for the library (if dashscope is available)
-        try:
-            import dashscope
-            dashscope.api_key = self.api_key
-            if self.region:
-                dashscope.region = self.region
-        except ImportError:
-            pass  # dashscope not installed yet
+        # Only set DashScope API key if we're using DashScope endpoint (not OpenAI)
+        # Check if base_url points to OpenAI - if so, skip DashScope initialization
+        is_openai_endpoint = self.base_url and 'openai.com' in self.base_url.lower()
+        
+        if not is_openai_endpoint:
+            # Set DashScope API key for the library (if dashscope is available)
+            try:
+                import dashscope
+                dashscope.api_key = self.api_key
+                if self.region:
+                    dashscope.region = self.region
+            except ImportError:
+                pass  # dashscope not installed yet
         
         # TODO: Initialize DashScope client here
         # Example:
@@ -214,37 +219,82 @@ class QwenProvider(LlmProvider, EmbeddingProvider):
                 # Batch process embeddings (OpenAI API can handle batch)
                 # Try batch first for efficiency
                 try:
-                    response = client.embeddings.create(
-                        model=self.embedding_model,
-                        input=texts,  # Send all texts at once
-                        dimensions=self.embedding_dim,
-                        encoding_format="float"
-                    )
+                    # For OpenAI models, dimensions parameter is optional
+                    # text-embedding-3-small/large support dimensions parameter
+                    # text-embedding-ada-002 doesn't support dimensions parameter
+                    create_kwargs = {
+                        "model": self.embedding_model,
+                        "input": texts,  # Send all texts at once
+                        "encoding_format": "float"
+                    }
+                    # Only add dimensions for models that support it (text-embedding-3-*)
+                    if 'text-embedding-3' in self.embedding_model and hasattr(self, 'embedding_dim'):
+                        create_kwargs["dimensions"] = self.embedding_dim
+                    
+                    response = client.embeddings.create(**create_kwargs)
                     return [item.embedding for item in response.data]
                 except Exception:
                     # If batch fails, try individual requests
                     embeddings_list = []
                     for text in texts:
-                        response = client.embeddings.create(
-                            model=self.embedding_model,
-                            input=text,
-                            dimensions=self.embedding_dim,
-                            encoding_format="float"
-                        )
+                        create_kwargs = {
+                            "model": self.embedding_model,
+                            "input": text,
+                            "encoding_format": "float"
+                        }
+                        # Only add dimensions for models that support it
+                        if 'text-embedding-3' in self.embedding_model and hasattr(self, 'embedding_dim'):
+                            create_kwargs["dimensions"] = self.embedding_dim
+                        
+                        response = client.embeddings.create(**create_kwargs)
                         embeddings_list.append(response.data[0].embedding)
                     return embeddings_list
             except ImportError:
                 # Fall back to native DashScope API if OpenAI client not available
                 pass
             except Exception as e:
-                # If OpenAI-compatible fails, fall back to native API
+                # If using OpenAI endpoint, don't fall back to DashScope - raise the error
+                if self.base_url and 'openai.com' in self.base_url.lower():
+                    # This is an OpenAI endpoint - don't fall back to DashScope
+                    error_msg = str(e)
+                    error_type = type(e).__name__
+                    
+                    # Check for quota/rate limit errors
+                    is_quota_error = (
+                        "429" in error_msg or 
+                        "quota" in error_msg.lower() or 
+                        "insufficient_quota" in error_msg.lower() or
+                        "RateLimitError" in error_type
+                    )
+                    
+                    if is_quota_error:
+                        raise RuntimeError(
+                            f"OpenAI embedding API error: Quota exceeded (429). "
+                            f"Your API key is valid but you've exceeded your usage quota. "
+                            f"Please add credits at https://platform.openai.com/account/billing "
+                            f"or wait for quota to reset. Error: {error_msg}"
+                        )
+                    elif "Invalid API-key" in error_msg or "401" in error_msg or "authentication" in error_msg.lower():
+                        raise RuntimeError(
+                            f"OpenAI embedding API error: {error_msg}. "
+                            "Please check your OPENAI_API_KEY is valid and has embedding access."
+                        )
+                    raise RuntimeError(f"OpenAI embedding API error: {error_msg}")
+                
+                # If OpenAI-compatible fails for DashScope endpoint, fall back to native API
                 # Only fall back if it's not an access denied error (which means model exists)
                 if "Access denied" not in str(e) and "does not exist" not in str(e):
                     pass
                 else:
                     raise
             
-            # Use native DashScope embeddings API
+            # Use native DashScope embeddings API (only if not using OpenAI endpoint)
+            if self.base_url and 'openai.com' in self.base_url.lower():
+                # Should not reach here if OpenAI endpoint is used
+                raise RuntimeError(
+                    "OpenAI endpoint should use OpenAI-compatible API, not DashScope native API. "
+                    "This indicates a configuration error."
+                )
             from dashscope import embeddings
             import dashscope
             

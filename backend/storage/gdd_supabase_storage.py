@@ -730,6 +730,32 @@ def index_gdd_chunks_to_supabase(
                         
                 except Exception as e:
                     elapsed = time.time() - start_time if 'start_time' in locals() else 0
+                    error_str = str(e)
+                    
+                    # Check for quota/rate limit errors (429)
+                    is_quota_error = (
+                        "429" in error_str or 
+                        "quota" in error_str.lower() or 
+                        "insufficient_quota" in error_str.lower() or
+                        "RateLimitError" in str(type(e).__name__)
+                    )
+                    
+                    if is_quota_error:
+                        # Quota errors shouldn't be retried - they won't resolve quickly
+                        error_msg = (
+                            f"❌ OpenAI API Quota Exceeded (429 Error)\n\n"
+                            f"Your OpenAI API key is valid, but you've exceeded your usage quota.\n\n"
+                            f"To fix this:\n"
+                            f"1. Add credits: https://platform.openai.com/account/billing\n"
+                            f"2. Check usage: https://platform.openai.com/usage\n"
+                            f"3. Wait for quota to reset (usually monthly)\n\n"
+                            f"Error details: {error_str}\n\n"
+                            f"Document indexing cannot continue without embeddings. "
+                            f"Please add credits to your OpenAI account and try again."
+                        )
+                        logger.error(error_msg)
+                        failed_chunks.append((i, chunk_id, "quota exceeded"))
+                        raise Exception(error_msg)
                     
                     if attempt == max_retries - 1:
                         # Last attempt failed
@@ -738,7 +764,7 @@ def index_gdd_chunks_to_supabase(
                         # Don't skip - raise error to prevent silent data loss
                         raise Exception(f"Failed to embed chunk {chunk_id} (index {i}): {e}. This indicates a critical indexing error.")
                     else:
-                        # Retry with exponential backoff
+                        # Retry with exponential backoff (but not for quota errors)
                         wait_time = (2 ** attempt) * 1.0  # 1s, 2s, 4s
                         logger.warning(f"Embedding attempt {attempt + 1} failed for chunk {chunk_id} (index {i}) after {elapsed:.2f}s, retrying in {wait_time:.1f}s... Error: {e}")
                         time.sleep(wait_time)

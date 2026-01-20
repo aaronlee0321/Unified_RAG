@@ -12,9 +12,12 @@ markdown>=3.4.0
 
 # GDD RAG dependencies
 dashscope>=1.25.0
-lightrag>=0.1.0b6
-lightrag-hku>=1.4.9.8
-docling>=1.0.0  # PDF to Markdown conversion
+# NOTE: lightrag and lightrag-hku require Python 3.10+ (uses 'match' statement)
+# These are only needed for legacy RAGAnything integration, not for core Supabase-based functionality
+# If you need RAGAnything features, upgrade to Python 3.10+ and uncomment:
+# lightrag>=0.1.0b6
+# lightrag-hku>=1.4.9.8
+docling>=1.0.0  # PDF to Markdown conversion (optional - falls back to PyPDF2 if not installed)
 
 # Keyword Extractor backend dependencies (for document upload/processing)
 langchain-text-splitters>=0.0.1  # Text chunking utilities
@@ -27,4 +30,7 @@ pgvector>=0.2.0
 # Optional but recommended
 redis>=5.0.0
 cohere>=4.0.0
+
+# Free LLM options
+google-genai>=0.2.0  # For Google Gemini (FREE tier)
 

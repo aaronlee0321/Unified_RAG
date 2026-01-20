@@ -86,6 +86,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
+    // --- ALIAS MANAGEMENT ELEMENTS (must be declared before loadAliases) ---
+    const aliasKeywordsList = document.getElementById('alias-keywords-list');
+    const aliasLoader = document.getElementById('alias-loader-container');
+    const aliasSearch = document.getElementById('alias-search');
+    const aliasStats = document.getElementById('alias-stats');
+    const aliasAddBtn = document.getElementById('alias-add-keyword-btn');
+    const addKeywordDialog = document.getElementById('add-keyword-dialog');
+    const confirmAddBtn = document.getElementById('confirm-add-keyword');
+    const langFilterBtns = document.querySelectorAll('#tab-aliases .badge-btn');
+
     // Load initial data
     loadGDDDocuments();
     loadCodeFiles();
@@ -95,9 +105,15 @@ document.addEventListener('DOMContentLoaded', function() {
     async function runProcessingLoop(type) {
         const s = state[type];
         if (s.queue.length === 0 || s.isPaused) return;
-        const nextFile = s.queue.find(f => f.status === "queued");
-        if (!nextFile || s.currentProcessing) return;
+        if (s.currentProcessing) return; // Already processing something
         
+        const nextFile = s.queue.find(f => f.status === "queued");
+        if (!nextFile) {
+            // No queued files, but check if we need to continue processing
+            return;
+        }
+        
+        // Start processing the next file
         await processFile(type, nextFile);
     }
 
@@ -105,7 +121,11 @@ document.addEventListener('DOMContentLoaded', function() {
     async function processFile(type, queuedFile) {
         const s = state[type];
         s.currentProcessing = queuedFile.id;
-        updateQueueItem(type, queuedFile.id, { status: "processing", progress: 10 });
+        updateQueueItem(type, queuedFile.id, { 
+            status: "processing", 
+            progress: 10,
+            step: "Uploading file..."
+        });
         updateUploadUI(type);
 
         try {
@@ -119,38 +139,71 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
 
             if (data.status === 'error' || !data.job_id) {
-                updateQueueItem(type, queuedFile.id, { status: "error", error: data.message || 'Upload failed' });
+                console.error(`Upload failed for ${queuedFile.file.name}:`, data);
+                updateQueueItem(type, queuedFile.id, { 
+                    status: "error", 
+                    error: data.message || 'Upload failed',
+                    step: "Upload failed"
+                });
                 s.currentProcessing = null;
                 runProcessingLoop(type);
                 return;
             }
 
             const jobId = data.job_id;
+            console.log(`Upload started for ${queuedFile.file.name}, job_id: ${jobId}`);
             
             const pollStatus = async () => {
-                const statusRes = await fetch(`${statusUrl}?job_id=${encodeURIComponent(jobId)}`);
-                const statusData = await statusRes.json();
+                try {
+                    const statusRes = await fetch(`${statusUrl}?job_id=${encodeURIComponent(jobId)}`);
+                    const statusData = await statusRes.json();
 
-                if (statusData.status === 'success') {
-                    updateQueueItem(type, queuedFile.id, { status: "completed", progress: 100, chunks: statusData.chunks_count || 0 });
-                    
-                    if (type === 'gdd') await loadGDDDocuments();
-                    else await loadCodeFiles();
+                    if (statusData.status === 'success') {
+                        updateQueueItem(type, queuedFile.id, { 
+                            status: "completed", 
+                            progress: 100, 
+                            chunks: statusData.chunks_count || 0,
+                            step: statusData.step || "Completed"
+                        });
+                        
+                        if (type === 'gdd') await loadGDDDocuments();
+                        else await loadCodeFiles();
 
-                    setTimeout(() => {
-                        s.queue = s.queue.filter(f => f.id !== queuedFile.id);
+                        setTimeout(() => {
+                            s.queue = s.queue.filter(f => f.id !== queuedFile.id);
+                            s.currentProcessing = null;
+                            renderQueue(type);
+                            updateUploadUI(type);
+                            runProcessingLoop(type);
+                        }, 1000);
+                    } else if (statusData.status === 'error') {
+                        updateQueueItem(type, queuedFile.id, { 
+                            status: "error", 
+                            error: statusData.message || statusData.step || "Processing failed",
+                            step: statusData.step || "Error"
+                        });
                         s.currentProcessing = null;
-                        renderQueue(type);
-                        updateUploadUI(type);
                         runProcessingLoop(type);
-                    }, 1000);
-                } else if (statusData.status === 'error') {
-                    updateQueueItem(type, queuedFile.id, { status: "error", error: statusData.message });
+                    } else {
+                        // Status is "running" - update to show processing with step message
+                        const step = statusData.step || "Processing...";
+                        const progress = statusData.progress || (statusData.status === 'running' ? 50 : 10);
+                        updateQueueItem(type, queuedFile.id, { 
+                            status: "processing", 
+                            progress: progress,
+                            step: step
+                        });
+                        setTimeout(pollStatus, 1500);
+                    }
+                } catch (error) {
+                    console.error("Error polling status:", error);
+                    updateQueueItem(type, queuedFile.id, { 
+                        status: "error", 
+                        error: `Status check failed: ${error.message}`,
+                        step: "Error"
+                    });
                     s.currentProcessing = null;
                     runProcessingLoop(type);
-                } else {
-                    updateQueueItem(type, queuedFile.id, { progress: 50 });
-                    setTimeout(pollStatus, 1500);
                 }
             };
 
@@ -174,6 +227,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const list = type === 'gdd' ? gddQueueList : codeQueueList;
         const header = type === 'gdd' ? gddQueueHeader : codeQueueHeader;
 
+        if (!section || !list) {
+            console.warn(`Queue elements not found for type: ${type}`);
+            return;
+        }
+
         if (s.queue.length === 0) {
             section.classList.add('hidden');
             return;
@@ -183,25 +241,38 @@ document.addEventListener('DOMContentLoaded', function() {
 
         list.innerHTML = s.queue.map(item => {
             const isCompleted = item.status === 'completed';
+            const isProcessing = item.status === 'processing';
+            const isError = item.status === 'error';
             const iconClass = type === 'code' && item.status === 'queued' ? 'icon-code' : getQueueIcon(item.status);
             return `
-                <div class="queue-item ${isCompleted ? 'completed' : ''}" data-id="${item.id}">
-                    <i class="${iconClass} ${item.status === 'processing' ? 'animate-spin' : ''}" style="color: ${getQueueIconColor(item.status)}; font-size: 16px;"></i>
+                <div class="queue-item ${isCompleted ? 'completed' : ''} ${isError ? 'error' : ''}" data-id="${item.id}">
+                    <i class="${iconClass} ${isProcessing ? 'animate-spin' : ''}" style="color: ${getQueueIconColor(item.status)}; font-size: 16px;"></i>
                     <div style="flex: 1; min-width: 0;">
                         <div style="font-size: 0.875rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                             ${item.file.name}
                         </div>
-                        ${item.status === 'processing' ? `
-                            <div class="progress-bar-container">
-                                <div class="progress-bar-fill" style="width: ${item.progress}%"></div>
+                        ${isProcessing ? `
+                            <div style="font-size: 0.75rem; color: var(--muted-foreground); margin-top: 4px;">
+                                ${item.step || 'Processing...'}
+                            </div>
+                            <div class="progress-bar-container" style="margin-top: 6px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;">
+                                <div class="progress-bar-fill" style="width: ${item.progress || 50}%; height: 100%; background: var(--primary); transition: width 0.3s ease;"></div>
+                            </div>
+                        ` : ''}
+                        ${isError ? `
+                            <div style="font-size: 0.75rem; color: var(--status-error); margin-top: 4px;">
+                                ${item.error || item.step || 'Error occurred'}
                             </div>
                         ` : ''}
                         ${isCompleted ? `
-                            <div style="font-size: 0.75rem; color: #16a34a; margin-top: 2px;">${item.chunks || 0} chunks</div>
+                            <div style="font-size: 0.75rem; color: #16a34a; margin-top: 4px;">✓ ${item.chunks || 0} chunks indexed</div>
+                        ` : ''}
+                        ${item.status === 'queued' ? `
+                            <div style="font-size: 0.75rem; color: var(--muted-foreground); margin-top: 4px;">Waiting...</div>
                         ` : ''}
                     </div>
                     ${!isCompleted ? `
-                        <button class="action-btn cancel-btn" data-id="${item.id}">
+                        <button class="action-btn cancel-btn" data-id="${item.id}" title="Cancel">
                             <i class="icon-x" style="font-size: 14px;"></i>
                         </button>
                     ` : ''}
@@ -422,16 +493,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function addFilesToQueue(type, files) {
         const s = state[type];
-        const newFiles = Array.from(files).map(file => ({
-            id: `queue-${Date.now()}-${Math.random()}`,
+        const newFiles = Array.from(files).map((file, idx) => ({
+            id: `queue-${Date.now()}-${idx}-${Math.random()}`,
             file,
             status: "queued",
-            progress: 0
+            progress: 0,
+            step: "Queued"
         }));
         s.queue = [...s.queue, ...newFiles];
         renderQueue(type);
         updateUploadUI(type);
-        runProcessingLoop(type);
+        // Start processing immediately if not paused and nothing is currently processing
+        if (!s.isPaused && !s.currentProcessing) {
+            runProcessingLoop(type);
+        }
     }
 
     // 5. Helpers
@@ -528,15 +603,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- ALIAS MANAGEMENT LOGIC ---
-    const aliasKeywordsList = document.getElementById('alias-keywords-list');
-    const aliasLoader = document.getElementById('alias-loader-container');
-    const aliasSearch = document.getElementById('alias-search');
-    const aliasStats = document.getElementById('alias-stats');
-    const aliasAddBtn = document.getElementById('alias-add-keyword-btn');
-    const addKeywordDialog = document.getElementById('add-keyword-dialog');
-    const confirmAddBtn = document.getElementById('confirm-add-keyword');
-    const langFilterBtns = document.querySelectorAll('#tab-aliases .badge-btn');
-
     async function loadAliases() {
         if (aliasLoader) aliasLoader.classList.remove('hidden');
         try {

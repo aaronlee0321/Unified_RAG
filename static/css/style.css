@@ -1438,7 +1438,7 @@ main {
 .explainer-layout {
     display: flex;
     gap: 0;
-    height: calc(100vh - 128px); /* Full viewport minus main header (64px) and explainer header (64px) */
+    height: calc(100vh - 64px); /* Full viewport minus main header */
     overflow: hidden;
     flex: 1;
     min-height: 0;
@@ -1461,7 +1461,7 @@ main {
     flex-shrink: 0;
     padding: 0;
     border-right: 1px solid var(--border);
-    overflow: hidden;
+    overflow: hidden; /* contain children; inner scroll will handle overflow */
     display: flex;
     flex-direction: column;
     background: white;
@@ -1485,17 +1485,19 @@ main {
 }
 
 #explainer-results-container {
-    flex: 1;
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    max-height: 100%;
 }
 
 #explainer-results-checkboxes {
     overflow-y: auto;
     overflow-x: hidden;
-    flex: 1 1 0;
+    flex: 1 1 auto;
     min-height: 0;
+    max-height: 100%;
     position: relative;
 }
 
@@ -1506,9 +1508,8 @@ main {
 }
 
 .collapsible-header {
-    position: sticky;
-    top: 0;
-    z-index: 10;
+    /* make header static to avoid overlaying the list area */
+    position: static;
     background: #F8FAFC;
     padding: 12px 16px;
     border-bottom: 1px solid var(--border);
@@ -1519,18 +1520,18 @@ main {
 }
 
 .collapsible-content {
-    transition: max-height 0.3s ease, opacity 0.3s ease;
-    overflow: hidden;
-    min-height: 0;
+    /* Make results fill and scroll the full sidebar */
     display: flex;
     flex-direction: column;
-    flex: 1; /* Allow content to fill the sidebar */
+    flex: 1 1 auto;
+    min-height: 0;
     max-height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .collapsible-content.collapsed {
-    max-height: 0;
-    opacity: 0;
+    display: none;
 }
 
 .source-chunk-card {
@@ -1618,6 +1619,10 @@ main {
     margin-bottom: 16px;
     padding-bottom: 16px;
     border-bottom: 1px solid var(--border-color);
+    background: #fafafa;
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 
 .select-option {
@@ -1635,6 +1640,16 @@ main {
     gap: 24px;
     overflow-y: auto;
     background: #F9FAFB;
+}
+
+/* Prevent text selection overlay in the left sidebar to avoid purple highlight */
+.explainer-left {
+    user-select: none;
+}
+.explainer-left input,
+.explainer-left label,
+.explainer-left span {
+    user-select: none;
 }
 
 .explanation-bubble {

@@ -24,8 +24,8 @@ QWEN_API_KEY = os.getenv('QWEN_API_KEY') or DASHSCOPE_API_KEY
 REGION = os.getenv('REGION', 'intl')
 
 # Model configuration
-DEFAULT_LLM_MODEL = os.getenv('DEFAULT_LLM_MODEL', 'qwen-plus')
-DEFAULT_EMBEDDING_MODEL = os.getenv('DEFAULT_EMBEDDING_MODEL', 'text-embedding-3-small')
+DEFAULT_LLM_MODEL = os.getenv('DEFAULT_LLM_MODEL', 'gemini-1.5-flash')
+DEFAULT_EMBEDDING_MODEL = os.getenv('DEFAULT_EMBEDDING_MODEL', 'text-embedding-004')
 
 # Chunking configuration (for keyword extractor backend)
 CHUNK_SIZE = int(os.getenv('CHUNK_SIZE', 500))
@@ -49,8 +49,9 @@ def validate_config():
         errors.append("SUPABASE_URL is required")
     if not SUPABASE_KEY:
         errors.append("SUPABASE_KEY is required")
-    if not DASHSCOPE_API_KEY:
-        errors.append("DASHSCOPE_API_KEY or QWEN_API_KEY is required")
+    # Prefer Gemini; do not require paid providers
+    if not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
+        errors.append("GEMINI_API_KEY (or GOOGLE_API_KEY) is required for LLM/embeddings")
     
     if errors:
         raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))

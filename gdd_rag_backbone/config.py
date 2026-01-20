@@ -60,12 +60,10 @@ OPENAI_BASE_URL: Optional[str] = os.getenv("OPENAI_BASE_URL", "https://api.opena
 # Google Gemini API configuration
 GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
-# Model defaults
-DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "qwen-max")
-# Use text-embedding-v3 or v4 (available via OpenAI-compatible endpoint)
-# v3 and v4 both have 1024 dimensions
-# For Gemini, use text-embedding-004 (768 dimensions) or gemini-embedding models
-DEFAULT_EMBEDDING_MODEL = os.getenv("DEFAULT_EMBEDDING_MODEL", "text-embedding-004")  # Gemini embedding model
+# Model defaults - Using Google Gemini by default
+DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gemini-1.5-flash")
+# Gemini embedding model default
+DEFAULT_EMBEDDING_MODEL = os.getenv("DEFAULT_EMBEDDING_MODEL", "text-embedding-004")
 
 # Ensure directories exist
 DEFAULT_WORKING_DIR.mkdir(parents=True, exist_ok=True)

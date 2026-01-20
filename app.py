@@ -22,16 +22,16 @@ import threading
 from time import sleep
 
 # Global dict: job_id -> progress info
-UPLOAD_JOBS = {}  # { job_id: {"status": "running|success|error", "step": "...", "message": "", "doc_id": None } }
+UPLOAD_JOBS = {}  # { job_id: {"status": "running|success|error", "step": "...", "message": "", "doc_id": None, "chunks_count": None } }
 JOBS_LOCK = threading.Lock()
 
 def new_job():
     job_id = uuid.uuid4().hex
     with JOBS_LOCK:
-        UPLOAD_JOBS[job_id] = {"status": "running", "step": "Uploading file", "message": "", "doc_id": None}
+        UPLOAD_JOBS[job_id] = {"status": "running", "step": "Uploading file", "message": "", "doc_id": None, "chunks_count": None}
     return job_id
 
-def update_job(job_id, step=None, status=None, message=None, doc_id=None):
+def update_job(job_id, step=None, status=None, message=None, doc_id=None, chunks_count=None):
     with JOBS_LOCK:
         job = UPLOAD_JOBS.get(job_id)
         if not job:
@@ -44,6 +44,8 @@ def update_job(job_id, step=None, status=None, message=None, doc_id=None):
             job["message"] = message
         if doc_id is not None:
             job["doc_id"] = doc_id
+        if chunks_count is not None:
+            job["chunks_count"] = chunks_count
 
 def get_job(job_id):
     with JOBS_LOCK:
@@ -52,18 +54,30 @@ def get_job(job_id):
 
 
 def run_upload_pipeline_async(job_id, pdf_bytes, filename):
-    # Progress callback used by document_service (keyword_extractor backend)
+    # Progress callback used by GDD service
     def progress_cb(step_text):
         update_job(job_id, step=step_text)
 
     try:
         update_job(job_id, step="Starting upload")
-        # Use keyword_extractor's document_service.upload_and_index_document
-        from backend.services.document_service import upload_and_index_document
-        result = upload_and_index_document(pdf_bytes, filename, progress_callback=progress_cb)
-        # result is dict: {"status": "success|error", "message": "...", "doc_id": "...", "chunks_count": ...}
+        # Use GDD service's upload_and_index_document_bytes for proper GDD indexing
+        # This uses MarkdownChunker and stores in keyword_chunks with proper GDD structure
+        from backend.gdd_service import upload_and_index_document_bytes
+        result = upload_and_index_document_bytes(pdf_bytes, filename, progress_cb=progress_cb)
+        # result is dict: {"status": "success|error", "message": "...", "doc_id": "...", ...}
         if result.get("status") == "success":
-            update_job(job_id, status="success", step="Completed", message=result.get("message"), doc_id=result.get("doc_id"))
+            doc_id = result.get("doc_id")
+            # Try to get chunks count from database
+            chunks_count = None
+            try:
+                from backend.storage.supabase_client import get_supabase_client
+                client = get_supabase_client()
+                result_query = client.table('keyword_chunks').select('id', count='exact').eq('doc_id', doc_id).limit(1).execute()
+                chunks_count = result_query.count if hasattr(result_query, 'count') else None
+            except Exception:
+                pass  # chunks_count will remain None if query fails
+            
+            update_job(job_id, status="success", step="Completed", message=result.get("message"), doc_id=doc_id, chunks_count=chunks_count)
         else:
             update_job(job_id, status="error", step="Failed", message=result.get("message"))
     except Exception as e:
@@ -318,7 +332,9 @@ app.logger.info(f"Project root: {PROJECT_ROOT}")
 
 # Log PORT environment variable (critical for Render)
 port_env = os.getenv('PORT')
-app.logger.info(f"PORT environment variable: {port_env if port_env else 'NOT SET (will use default 5000)'}")
+default_port = 13699
+app.logger.info(f"PORT environment variable: {port_env if port_env else f'NOT SET (will use default {default_port})'}")
+app.logger.info(f"App will run on port: {int(port_env) if port_env else default_port}")
 app.logger.info(f"Python version: {sys.version}")
 
 # Initialize service availability flags
@@ -537,7 +553,8 @@ def gdd_upload_status():
         'status': job['status'],  # running | success | error
         'step': job['step'],
         'message': job['message'],
-        'doc_id': job['doc_id'],
+        'doc_id': job.get('doc_id'),
+        'chunks_count': job.get('chunks_count'),
         'job_id': job_id,
     }), 200
 
@@ -1339,8 +1356,10 @@ except Exception as e:
     # Don't raise - let gunicorn handle it
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
+    # Default to port 13699, but allow override via PORT environment variable
+    port = int(os.getenv('PORT', 13699))
     debug = os.getenv('FLASK_ENV') == 'development'
     app.logger.info(f"Starting Flask development server on port {port}")
+    app.logger.info(f"Server will be accessible at http://0.0.0.0:{port} or http://localhost:{port}")
     app.run(host='0.0.0.0', port=port, debug=debug)
 

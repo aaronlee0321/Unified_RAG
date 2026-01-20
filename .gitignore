@@ -50,6 +50,10 @@ Assets/
 *.so
 *.dylib
 
+
 # Indexed chunks and embeddings (but keep config JSON files)
 gdd_data/**/*.json
 chunks/**/*.json
+
+# Ignore Tank War assets (directory with space)
+Tank War/

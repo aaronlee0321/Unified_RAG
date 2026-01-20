@@ -1,6 +1,6 @@
 """
 Simple LLM provider wrapper for keyword extractor.
-Supports OpenAI-compatible APIs (Qwen/DashScope, OpenAI).
+Defaults to Google Gemini (free tier). Falls back to OpenAI-compatible APIs if Gemini isn't configured.
 """
 import os
 from typing import Optional
@@ -12,9 +12,16 @@ except ImportError:
     OPENAI_AVAILABLE = False
     OpenAI = None
 
+try:
+    from gdd_rag_backbone.llm_providers import GeminiProvider
+    GEMINI_AVAILABLE = True
+except Exception:
+    GeminiProvider = None  # type: ignore
+    GEMINI_AVAILABLE = False
+
 
 class SimpleLLMProvider:
-    """Simple LLM provider using OpenAI-compatible API."""
+    """Simple LLM provider used by Keyword Finder / Deep Search."""
     
     def __init__(
         self,
@@ -23,60 +30,50 @@ class SimpleLLMProvider:
         model: Optional[str] = None,
     ):
         """
-        Initialize LLM provider (OpenAI).
+        Initialize LLM provider.
         
         Args:
-            api_key: API key (defaults to OPENAI_API_KEY, with fallback to QWEN_API_KEY or DASHSCOPE_API_KEY)
-            base_url: API base URL (defaults to OpenAI endpoint, Qwen/DashScope commented out)
-            model: Model name (defaults to gpt-4o-mini)
+            api_key: Optional API key (used for Gemini if provided; otherwise read from env)
+            base_url: OpenAI-compatible API base URL (only used if Gemini isn't configured)
+            model: Model name (Gemini model if using Gemini; otherwise OpenAI-compatible model)
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Prefer Gemini always if configured
+        gemini_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if gemini_key:
+            if not GEMINI_AVAILABLE:
+                raise RuntimeError(
+                    "Gemini is configured (GEMINI_API_KEY set) but Gemini provider is not available. "
+                    "Ensure `google-genai` is installed: pip install google-genai"
+                )
+            self._mode = "gemini"
+            self._gemini = GeminiProvider(api_key=gemini_key, llm_model=model or os.getenv("DEFAULT_LLM_MODEL") or "gemini-1.5-flash")  # type: ignore
+            self.model = getattr(self._gemini, "llm_model", model or "gemini-1.5-flash")
+            logger.info(f"[LLM Provider] Using Gemini model: {self.model}")
+            return
+
+        # Fallback: OpenAI-compatible provider (only if Gemini isn't configured)
+        self._mode = "openai_compatible"
         if not OPENAI_AVAILABLE:
-            raise ImportError("openai package is required. Install with: pip install openai")
-        
-        # Get API key from env or parameter - prioritize OpenAI
-        # COMMENTED OUT: Qwen usage - using OpenAI instead
-        # self.api_key = api_key or os.getenv('QWEN_API_KEY') or os.getenv('DASHSCOPE_API_KEY') or os.getenv('OPENAI_API_KEY')
-        self.api_key = api_key or os.getenv('OPENAI_API_KEY') or os.getenv('QWEN_API_KEY') or os.getenv('DASHSCOPE_API_KEY')
+            raise ImportError("openai package is required for OpenAI-compatible mode. Install with: pip install openai")
+
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
         if not self.api_key:
             raise ValueError(
-                "API key required. Set OPENAI_API_KEY environment variable"
+                "No Gemini key found and no OpenAI-compatible key found. "
+                "Set GEMINI_API_KEY (recommended) or OPENAI_API_KEY/QWEN_API_KEY/DASHSCOPE_API_KEY."
             )
-        
-        # Determine base URL - explicitly use OpenAI endpoint
-        # IMPORTANT: OpenAI client automatically reads OPENAI_BASE_URL from env,
-        # so we must explicitly override it to ensure we use OpenAI, not DashScope
+
+        # Determine base URL (OpenAI-compatible)
         if base_url:
             self.base_url = base_url
         else:
-            # Check if OPENAI_BASE_URL is set in environment
-            env_base_url = os.getenv('OPENAI_BASE_URL')
-            
-            # If OPENAI_BASE_URL points to DashScope/Qwen, explicitly use OpenAI endpoint
-            if env_base_url and 'dashscope' in env_base_url.lower():
-                # Force OpenAI endpoint - override DashScope setting
-                self.base_url = "https://api.openai.com/v1"
-            # If OPENAI_BASE_URL is set to OpenAI endpoint, use it
-            elif env_base_url and 'openai' in env_base_url.lower():
-                self.base_url = env_base_url
-            else:
-                # No OPENAI_BASE_URL or it's not set - use OpenAI default
-                self.base_url = "https://api.openai.com/v1"  # Explicitly set OpenAI endpoint
-        
-        # Model selection - use OpenAI model
-        # COMMENTED OUT: Qwen model default
-        # self.model = model or os.getenv('LLM_MODEL', 'qwen-plus')
-        self.model = model or os.getenv('LLM_MODEL', 'gpt-4o-mini')
-        
-        # Log configuration for debugging
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"[LLM Provider] Initializing with:")
-        logger.info(f"  - API Key starts with: {self.api_key[:10]}..." if self.api_key else "  - API Key: None")
-        logger.info(f"  - Base URL: {self.base_url or 'None (using OpenAI default)'}")
-        logger.info(f"  - Model: {self.model}")
-        logger.info(f"  - OPENAI_BASE_URL env: {os.getenv('OPENAI_BASE_URL', 'Not set')}")
-        
-        # Initialize client
+            self.base_url = os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+
+        self.model = model or os.getenv("LLM_MODEL") or "gpt-4o-mini"
+        logger.info(f"[LLM Provider] Using OpenAI-compatible endpoint: {self.base_url} model={self.model}")
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
     
     def llm(
@@ -98,12 +95,15 @@ class SimpleLLMProvider:
         Returns:
             Generated text response
         """
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        
         try:
+            if getattr(self, "_mode", None) == "gemini":
+                return self._gemini.llm(prompt=prompt, system_prompt=system_prompt, temperature=temperature, max_output_tokens=max_tokens)  # type: ignore
+
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,

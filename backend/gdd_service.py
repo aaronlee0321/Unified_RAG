@@ -347,20 +347,73 @@ def _select_chunks_for_answer(chunks):
 def _convert_pdf_bytes_to_markdown(pdf_bytes: bytes, filename: str) -> str:
     """
     Convert PDF bytes to Markdown using Docling without writing to disk.
+    Falls back to PyPDF2 if Docling is not available.
     Uses Docling DocumentStream (in-memory).
     """
-    from docling.document_converter import DocumentConverter
-    from docling.datamodel.base_models import DocumentStream
-    from PDFtoMarkdown.pdf_to_markdown import clean_markdown
-
-    converter = DocumentConverter()
-
-    stream = BytesIO(pdf_bytes)
-    doc_stream = DocumentStream(name=filename, stream=stream)  # Docling supports DocumentStream input [2](https://docling-project.github.io/docling/reference/document_converter/)[3](https://deepwiki.com/docling-project/docling/1.2-quick-start)
-
-    result = converter.convert(doc_stream)  # convert() accepts Path/URL/DocumentStream [2](https://docling-project.github.io/docling/reference/document_converter/)[4](https://deepwiki.com/docling-project/docling/7.3-usage-examples)
-    markdown_content = result.document.export_to_markdown()
-    return clean_markdown(markdown_content)
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Try Docling first (preferred method)
+    try:
+        from docling.document_converter import DocumentConverter
+        from docling.datamodel.base_models import DocumentStream
+        
+        # Try to import clean_markdown, but use simple function if not available
+        try:
+            from PDFtoMarkdown.pdf_to_markdown import clean_markdown
+        except ImportError:
+            # Simple markdown cleaning function if PDFtoMarkdown is not available
+            def clean_markdown(text):
+                if not text:
+                    return ""
+                # Basic cleaning: remove control characters except newlines and tabs
+                import re
+                # Remove null bytes and other control chars
+                text = re.sub(r'[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]', '', text)
+                return text
+        
+        converter = DocumentConverter()
+        stream = BytesIO(pdf_bytes)
+        doc_stream = DocumentStream(name=filename, stream=stream)
+        result = converter.convert(doc_stream)
+        markdown_content = result.document.export_to_markdown()
+        return clean_markdown(markdown_content)
+    
+    except ImportError as e:
+        logger.warning(f"Docling not available ({e}), falling back to PyPDF2")
+        # Fallback to PyPDF2
+        try:
+            from PyPDF2 import PdfReader
+            pdf_file = BytesIO(pdf_bytes)
+            reader = PdfReader(pdf_file)
+            text_parts = []
+            for page in reader.pages:
+                text_parts.append(page.extract_text())
+            text = "\n\n".join(text_parts)
+            # Basic markdown formatting
+            return text
+        except ImportError:
+            raise ImportError(
+                "Neither 'docling' nor 'PyPDF2' is installed. "
+                "Please install at least one: pip install docling OR pip install pypdf2"
+            )
+    except Exception as e:
+        logger.error(f"Docling conversion failed: {e}, falling back to PyPDF2")
+        # Fallback to PyPDF2 on any error
+        try:
+            from PyPDF2 import PdfReader
+            pdf_file = BytesIO(pdf_bytes)
+            reader = PdfReader(pdf_file)
+            text_parts = []
+            for page in reader.pages:
+                text_parts.append(page.extract_text())
+            text = "\n\n".join(text_parts)
+            return text
+        except Exception as fallback_error:
+            raise Exception(
+                f"PDF conversion failed with both Docling and PyPDF2. "
+                f"Docling error: {str(e)}, PyPDF2 error: {str(fallback_error)}"
+            )
 
 
 
@@ -386,18 +439,34 @@ def upload_and_index_document_bytes(pdf_bytes: bytes, original_filename: str, pr
     # 2) Build doc_id, storage filename
     bump("Preparing document identifiers")
     from werkzeug.utils import secure_filename
-    pdf_filename = secure_filename(original_filename).replace(" ", "_")
     doc_id = generate_md_doc_id(Path(original_filename))
 
-    # 3) Upload PDF to storage
+    # 3) Upload PDF to storage (optional - continue if bucket doesn't exist)
     bump("Uploading PDF to storage")
-    from backend.storage.supabase_client import get_supabase_client
-    client = get_supabase_client(use_service_key=True)
-    bucket_name = "gdd_pdfs"
-    client.storage.from_(bucket_name).upload(
-        path=pdf_filename, file=pdf_bytes,
-        file_options={"content-type": "application/pdf", "cache-control": "3600", "upsert": "true"}
-    )
+    pdf_storage_path = None
+    try:
+        from backend.storage.supabase_client import get_supabase_client
+        from werkzeug.utils import secure_filename
+        
+        client = get_supabase_client(use_service_key=True)
+        bucket_name = "gdd_pdfs"
+        pdf_filename = secure_filename(original_filename).replace(" ", "_")
+        
+        client.storage.from_(bucket_name).upload(
+            path=pdf_filename, file=pdf_bytes,
+            file_options={"content-type": "application/pdf", "cache-control": "3600", "upsert": "true"}
+        )
+        pdf_storage_path = pdf_filename
+        logger.info(f"✅ Successfully uploaded PDF to storage: {pdf_filename}")
+    except Exception as e:
+        # Log error but continue - PDF storage is optional
+        logger.warning(f"⚠️ Failed to upload PDF to storage (bucket may not exist): {e}")
+        logger.warning("⚠️ Continuing with indexing - PDF storage is optional. To enable:")
+        logger.warning("   1. Go to your Supabase project dashboard")
+        logger.warning("   2. Navigate to Storage section")
+        logger.warning("   3. Create a bucket named 'gdd_pdfs'")
+        logger.warning("   4. Set it to public if you want public access to PDFs")
+        pdf_storage_path = None
 
     # 4) Chunk markdown
     bump("Chunking Markdown")
@@ -405,14 +474,170 @@ def upload_and_index_document_bytes(pdf_bytes: bytes, original_filename: str, pr
     chunker = MarkdownChunker()
     chunks = chunker.chunk_document(markdown_content=markdown_content, doc_id=doc_id, filename=original_filename)
 
-    # 5) Embedding
+    # 5) Embedding - Try free options first (Gemini, Ollama), then paid (OpenAI, Qwen)
     bump("Generating embeddings")
-    # COMMENTED OUT: Qwen usage - using OpenAI instead (for embeddings, may still need Qwen)
-    # from gdd_rag_backbone.llm_providers import QwenProvider
-    # provider = QwenProvider()
-    # Note: For embeddings, we still use make_embedding_func which may require Qwen
-    from gdd_rag_backbone.llm_providers import QwenProvider
-    provider = QwenProvider()  # Still needed for embeddings
+    import os
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Try to select the best embedding provider - prioritize FREE options first
+    provider = None
+    provider_errors = []
+    
+    # Strategy 1: Try Gemini (FREE tier available)
+    gemini_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
+    logger.info(f"Checking for Gemini API key: {'Found' if gemini_key else 'Not found'}")
+    if gemini_key:
+        try:
+            from gdd_rag_backbone.llm_providers import GeminiProvider
+            embedding_model = os.getenv('EMBEDDING_MODEL', 'text-embedding-004')
+            llm_model = os.getenv('DEFAULT_LLM_MODEL', 'gemini-1.5-flash')
+            
+            provider = GeminiProvider(
+                api_key=gemini_key,
+                embedding_model=embedding_model
+            )
+            logger.info(f"✅ Using Gemini embeddings (model: {embedding_model}, dim: {provider.embedding_dim})")
+        except Exception as e:
+            provider_errors.append(f"Gemini: {str(e)}")
+            logger.warning(f"Gemini provider failed: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
+            provider = None
+    
+    # Strategy 2: Try Ollama (FREE - local, OpenAI-compatible)
+    if provider is None:
+        openai_base_url = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+        # Check if base_url points to Ollama (localhost:11434)
+        if 'localhost:11434' in openai_base_url or '127.0.0.1:11434' in openai_base_url:
+            logger.info("Detected Ollama base URL, trying Ollama...")
+            try:
+                from gdd_rag_backbone.llm_providers import QwenProvider
+                embedding_model = os.getenv('EMBEDDING_MODEL', 'mxbai-embed-large')
+                # Ollama doesn't need a real API key, but QwenProvider expects one
+                ollama_key = os.getenv('OPENAI_API_KEY', 'ollama')
+                
+                provider = QwenProvider(
+                    api_key=ollama_key,
+                    base_url=openai_base_url,
+                    embedding_model=embedding_model
+                )
+                # Ollama embedding models typically have 768 dimensions
+                # Adjust based on model: mxbai-embed-large=1024, nomic-embed-text=768
+                if 'mxbai-embed-large' in embedding_model:
+                    provider.embedding_dim = 1024
+                elif 'nomic-embed-text' in embedding_model:
+                    provider.embedding_dim = 768
+                else:
+                    provider.embedding_dim = 768  # Default for Ollama models
+                
+                logger.info(f"✅ Using Ollama embeddings (model: {embedding_model}, dim: {provider.embedding_dim})")
+            except Exception as e:
+                provider_errors.append(f"Ollama: {str(e)}")
+                logger.warning(f"Ollama provider failed: {e}")
+                logger.warning("Make sure Ollama is running: ollama serve")
+                logger.warning("And model is downloaded: ollama pull mxbai-embed-large")
+                provider = None
+    
+    # Strategy 3: Try OpenAI (PAID - but may have quota)
+    if provider is None:
+        openai_key = os.getenv('OPENAI_API_KEY')
+        openai_base_url = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+        # Only try OpenAI if base_url is actually OpenAI (not Ollama)
+        if openai_key and 'openai.com' in openai_base_url.lower():
+            logger.info(f"Checking for OpenAI API key: {'Found' if openai_key else 'Not found'}")
+            try:
+                # Use QwenProvider configured for OpenAI endpoint
+                from gdd_rag_backbone.llm_providers import QwenProvider
+                embedding_model = os.getenv('EMBEDDING_MODEL', 'text-embedding-3-small')
+                
+                # Create provider with OpenAI settings directly
+                provider = QwenProvider(
+                    api_key=openai_key,
+                    base_url=openai_base_url,
+                    embedding_model=embedding_model
+                )
+                
+                # Set correct embedding dimension based on model
+                if '3-small' in embedding_model:
+                    provider.embedding_dim = 1536
+                elif '3-large' in embedding_model:
+                    provider.embedding_dim = 3072
+                elif 'ada-002' in embedding_model:
+                    provider.embedding_dim = 1536
+                else:
+                    provider.embedding_dim = 1536  # Default for OpenAI models
+                
+                # Prevent DashScope initialization since we're using OpenAI
+                try:
+                    import dashscope
+                    if 'openai.com' in openai_base_url.lower():
+                        if hasattr(dashscope, 'api_key'):
+                            dashscope.api_key = None
+                except ImportError:
+                    pass
+                
+                logger.info(f"✅ Using OpenAI embeddings (model: {embedding_model}, dim: {provider.embedding_dim})")
+            except Exception as e:
+                provider_errors.append(f"OpenAI: {str(e)}")
+                logger.warning(f"OpenAI provider failed: {e}")
+                import traceback
+                logger.warning(traceback.format_exc())
+                provider = None
+    
+    # Strategy 4: Fallback to Qwen/DashScope if nothing else available
+    if provider is None:
+        logger.info("No free options available, trying Qwen/DashScope fallback...")
+        try:
+            from gdd_rag_backbone.llm_providers import QwenProvider
+            provider = QwenProvider()
+            # Verify API key exists
+            if provider.api_key:
+                logger.info("Using Qwen/DashScope embeddings (fallback)")
+            else:
+                raise ValueError("Qwen API key not configured")
+        except Exception as e:
+            provider_errors.append(f"Qwen/DashScope: {str(e)}")
+            logger.warning(f"Qwen provider failed: {e}")
+            provider = None
+    
+    # If no provider available, raise helpful error with setup instructions
+    if provider is None:
+        error_msg = (
+            "❌ Embedding provider initialization failed!\n\n"
+            "The system needs an API key or local setup for generating embeddings. "
+            "Please configure one of the following FREE options in your .env file:\n\n"
+            "🆓 FREE Option 1 (Recommended - Gemini):\n"
+            "  GEMINI_API_KEY=your-gemini-key\n"
+            "  EMBEDDING_MODEL=text-embedding-004\n"
+            "  Get free key: https://aistudio.google.com/app/apikey\n\n"
+            "🆓 FREE Option 2 (Ollama - Local, No API key needed):\n"
+            "  1. Install: brew install ollama\n"
+            "  2. Start: ollama serve\n"
+            "  3. Download: ollama pull mxbai-embed-large\n"
+            "  4. Set in .env:\n"
+            "     OPENAI_BASE_URL=http://localhost:11434/v1\n"
+            "     EMBEDDING_MODEL=mxbai-embed-large\n"
+            "     OPENAI_API_KEY=ollama  # Can be anything\n\n"
+            "💰 PAID Option 3 (OpenAI - Requires credits):\n"
+            "  OPENAI_API_KEY=sk-...\n"
+            "  EMBEDDING_MODEL=text-embedding-3-small\n\n"
+            "💰 PAID Option 4 (Qwen/DashScope):\n"
+            "  DASHSCOPE_API_KEY=sk-...\n"
+            "  REGION=intl\n\n"
+            "Errors encountered:\n"
+        )
+        for err in provider_errors:
+            error_msg += f"  - {err}\n"
+        error_msg += (
+            "\n📝 Quick Start (Gemini - Easiest FREE option):\n"
+            "1. Go to https://aistudio.google.com/app/apikey\n"
+            "2. Sign in with Google account\n"
+            "3. Create API key (FREE)\n"
+            "4. Add to .env: GEMINI_API_KEY=your-key\n"
+            "5. Restart the application\n"
+        )
+        raise Exception(error_msg)
 
     # 6) Index
     bump("Indexing into Supabase")
