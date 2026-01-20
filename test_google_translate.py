@@ -18,22 +18,22 @@ def detect_language_local(text: str) -> str:
     """
     try:
         from fast_langdetect import detect
-        
+
         # Detect language using fast-langdetect (lite model by default)
         result = detect(text, model='lite', k=1)
-        
+
         if result and len(result) > 0:
             # Extract language code (e.g., 'en', 'vi', 'zh-cn')
             lang_code = result[0]['lang']
-            
+
             # Handle language codes with subtags (e.g., 'zh-cn' -> 'zh', 'pt-br' -> 'pt')
             # For compatibility with Google Translate API
             base_lang = lang_code.split('-')[0].lower()
             return base_lang
-        
+
         # Fallback to English if detection fails
         return 'en'
-        
+
     except ImportError:
         # Fallback to simple regex-based detection if fast-langdetect not installed
         import re
@@ -52,32 +52,32 @@ def translate_with_google(text: str, target_language: str = None):
     """
     Translate text using free Google Translate API (no API key needed)
     Uses deep-translator library
-    
+
     Args:
         text: Text to translate
         target_language: Target language code ('en' or 'vi')
                         If None, auto-detects and translates to opposite
-    
+
     Returns:
         dict with translation results
     """
     try:
         from deep_translator import GoogleTranslator
-        
+
         # Detect source language locally first
         detected_lang = detect_language_local(text)
-        
+
         # Determine target language if not specified
         if target_language is None:
             if detected_lang == 'vi':
                 target_language = 'en'
             else:
                 target_language = 'vi'
-        
+
         # Translate
         translator = GoogleTranslator(source='auto', target=target_language)
         translated_text = translator.translate(text)
-        
+
         # Try to get detected language from translator
         # (deep-translator doesn't always return this, so we use our detection)
         try:
@@ -87,7 +87,7 @@ def translate_with_google(text: str, target_language: str = None):
                 detected_lang = detected.get('lang', detected_lang)
         except:
             pass
-        
+
         return {
             'original_text': text,
             'translated_text': translated_text,
@@ -95,7 +95,7 @@ def translate_with_google(text: str, target_language: str = None):
             'target_language': target_language,
             'success': True
         }
-        
+
     except ImportError:
         return {
             'original_text': text,
@@ -115,30 +115,30 @@ def translate_with_google(text: str, target_language: str = None):
 def display_translation(result: dict):
     """Display translation results"""
     print("\n" + "=" * 70)
-    
+
     if not result['success']:
         print("❌ Translation Failed")
         print(f"Error: {result['error']}")
         print("=" * 70 + "\n")
         return
-    
+
     # Language names
     lang_names = {
         'en': 'English',
         'vi': 'Vietnamese',
         'vie': 'Vietnamese'
     }
-    
+
     detected = result['detected_language']
     target = result['target_language']
-    
+
     print(f"📝 Original Text: {result['original_text']}")
     print(f"🌍 Detected Language: {lang_names.get(detected, detected)}")
     print("=" * 70)
-    
+
     print(f"\n🔄 Translation to {lang_names.get(target, target)}:")
     print(f"   {result['translated_text']}")
-    
+
     print("\n" + "=" * 70 + "\n")
 
 
@@ -147,22 +147,23 @@ def batch_translate(texts: list, target_language: str = None):
     print("\n" + "=" * 70)
     print(f"📚 Batch Translation ({len(texts)} items)")
     print("=" * 70)
-    
+
     results = []
     for i, text in enumerate(texts, 1):
         print(f"\n[{i}/{len(texts)}] Translating: {text[:50]}...")
         result = translate_with_google(text, target_language)
         results.append(result)
-        
+
         if result['success']:
             print(f"   ✓ {result['translated_text'][:60]}...")
         else:
             print(f"   ✗ Failed: {result['error']}")
-    
+
     print("\n" + "=" * 70)
-    print(f"✅ Completed: {sum(1 for r in results if r['success'])}/{len(texts)} successful")
+    print(
+        f"✅ Completed: {sum(1 for r in results if r['success'])}/{len(texts)} successful")
     print("=" * 70 + "\n")
-    
+
     return results
 
 
@@ -176,11 +177,11 @@ def show_examples():
         "The tank has heavy armor",
         "Xe tăng có lớp giáp dày"
     ]
-    
+
     print("\n" + "=" * 70)
     print("📚 Google Translate Examples")
     print("=" * 70)
-    
+
     for example in examples:
         print(f"\n{'─'*70}")
         result = translate_with_google(example)
@@ -191,7 +192,7 @@ def show_examples():
 def check_dependencies():
     """Check if required libraries are installed"""
     all_installed = True
-    
+
     # Check deep-translator
     try:
         from deep_translator import GoogleTranslator
@@ -200,7 +201,7 @@ def check_dependencies():
         print("❌ deep-translator library not found")
         print("   Install: pip install deep-translator")
         all_installed = False
-    
+
     # Check fast-langdetect
     try:
         from fast_langdetect import detect
@@ -209,7 +210,7 @@ def check_dependencies():
         print("⚠️  fast-langdetect library not found (optional, fallback to regex)")
         print("   Install for better detection: pip install fast-langdetect")
         # Don't set all_installed = False, as this is optional
-    
+
     if not all_installed:
         print("\n❌ Missing required dependencies")
         print("\nInstall all at once:")
@@ -217,7 +218,7 @@ def check_dependencies():
         print("\nFeatures:")
         print("  • deep-translator: FREE and UNLIMITED Google Translate API")
         print("  • fast-langdetect: Detects 176 languages (80x faster than alternatives)")
-    
+
     return all_installed
 
 
@@ -238,29 +239,29 @@ def main():
     print("  • 'batch' - Test batch translation")
     print("  • 'quit' or 'exit' - Exit")
     print("=" * 70 + "\n")
-    
+
     # Check dependencies
     if not check_dependencies():
         print("\n❌ Cannot proceed without required library")
         return
-    
+
     print()
-    
+
     while True:
         try:
             # Get input
             user_input = input("Enter text to translate: ").strip()
-            
+
             # Check exit
             if user_input.lower() in ['quit', 'exit', 'q']:
                 print("\n👋 Goodbye!")
                 break
-            
+
             # Check examples
             if user_input.lower() == 'examples':
                 show_examples()
                 continue
-            
+
             # Check batch
             if user_input.lower() == 'batch':
                 print("\nBatch mode: Enter texts (one per line), empty line to finish:")
@@ -270,18 +271,18 @@ def main():
                     if not line:
                         break
                     texts.append(line)
-                
+
                 if texts:
                     batch_translate(texts)
                 continue
-            
+
             if not user_input:
                 continue
-            
+
             # Translate
             result = translate_with_google(user_input)
             display_translation(result)
-            
+
         except KeyboardInterrupt:
             print("\n\n👋 Goodbye!")
             break
@@ -293,4 +294,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
