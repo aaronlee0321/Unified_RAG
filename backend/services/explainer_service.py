@@ -1,7 +1,6 @@
 """
 Document Explainer service - generates detailed explanations from keyword queries.
-Follows unified_rag_app patterns with section-based chunk retrieval.
-EXACT COPY from keyword_extractor - only imports updated.
+Uses section-based chunk retrieval with sequential LLM processing for comprehensive results.
 """
 from typing import List, Dict, Optional, Any, Tuple
 import re

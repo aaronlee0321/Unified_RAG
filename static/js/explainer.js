@@ -1,9 +1,7 @@
-// Document Explainer functionality (Tab 2)
-// Exact replication of keyword_extractor Gradio app behavior using vanilla JS
+// Document Explainer functionality - Keyword Finder tab
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Only initialize if we're on the Explainer page
-    // Check for unique explainer elements instead of a tab-specific ID
+    // Early exit if not on the Keyword Finder page
     const explainerKeyword = document.getElementById('explainer-keyword');
     if (!explainerKeyword) {
         return;
@@ -147,7 +145,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (languageToggle) {
         languageToggle.addEventListener('change', function() {
             selectedLanguage = this.checked ? 'vn' : 'en';
-            console.log('Language changed to:', selectedLanguage);
             // Store in sessionStorage for persistence
             sessionStorage.setItem('explainer_language', selectedLanguage);
         });
@@ -215,7 +212,6 @@ document.addEventListener('DOMContentLoaded', function() {
             );
             
             if (foundAliasKW) {
-                console.log(`Found alias for "${keyword}" -> Primary keyword: "${foundAliasKW.name}"`);
                 searchKeywords.push(foundAliasKW.name);
             }
 
@@ -334,10 +330,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 displayProgressMessages(deepResult.progress_messages, resultsCount);
             }
             
-            // Update message if retry was performed
-            if (deepResult.retry_performed) {
-                console.log('Not found, retrying with different keywords...');
-            }
             
             if (deepResult.error) {
                 resultsCount.textContent = `Error: ${deepResult.error}`;
@@ -421,27 +413,26 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             document.head.appendChild(style);
             
+            const closeModal = (result) => {
+                document.body.removeChild(modal);
+                document.head.removeChild(style);
+                resolve(result);
+            };
+            
             modal.querySelectorAll('.keyword-option-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    const keyword = btn.dataset.keyword;
-                    document.body.removeChild(modal);
-                    document.head.removeChild(style);
-                    resolve(keyword);
+                    closeModal(btn.dataset.keyword);
                 });
             });
             
             modal.querySelector('.cancel-btn').addEventListener('click', () => {
-                document.body.removeChild(modal);
-                document.head.removeChild(style);
-                resolve(null);
+                closeModal(null);
             });
             
             // Close on backdrop click
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) {
-                    document.body.removeChild(modal);
-                    document.head.removeChild(style);
-                    resolve(null);
+                    closeModal(null);
                 }
             });
         });
@@ -615,23 +606,11 @@ document.addEventListener('DOMContentLoaded', function() {
         Object.keys(groupedResults).forEach(docName => {
             const sections = groupedResults[docName];
             
-            // Debug: Log chunk_ids before sorting
-            console.log(`[DEBUG] Document: ${docName}, sections count: ${sections.length}`);
-            sections.forEach((s, idx) => {
-                console.log(`  [${idx}] chunk_id: "${s.storeItem?.chunk_id || 'MISSING'}", section: ${s.storeItem?.section_heading}`);
-            });
-            
-            // Sort sections by chunk_id with natural/numeric sorting (e.g., _1, _2, ..., _9, _10, _11)
+            // Sort sections by chunk_id with natural/numeric sorting
             sections.sort((sectionA, sectionB) => {
                 const chunkIdA = sectionA.storeItem?.chunk_id || '';
                 const chunkIdB = sectionB.storeItem?.chunk_id || '';
                 return chunkIdA.localeCompare(chunkIdB, undefined, { numeric: true, sensitivity: 'base' });
-            });
-            
-            // Debug: Log chunk_ids after sorting
-            console.log(`[DEBUG] After sorting:`);
-            sections.forEach((s, idx) => {
-                console.log(`  [${idx}] chunk_id: "${s.storeItem?.chunk_id || 'MISSING'}", section: ${s.storeItem?.section_heading}`);
             });
             
             const docId = `doc-${hashString(docName)}`;
@@ -1093,7 +1072,6 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (foundAliasKW) {
                 explanationKeyword = foundAliasKW.name;
-                console.log(`Using parent keyword "${explanationKeyword}" for explanation (original alias: "${keyword}")`);
             }
             
             const response = await fetch('/api/gdd/explainer/explain', {

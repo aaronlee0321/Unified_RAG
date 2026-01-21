@@ -1,6 +1,5 @@
 """
-GDD Document Explainer backend functions.
-EXACT COPY of logic from keyword_extractor - only adapted for Flask JSON responses.
+GDD Document Explainer backend functions for keyword-based document search and explanation generation.
 """
 import json
 import logging
