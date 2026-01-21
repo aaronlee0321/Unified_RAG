@@ -1468,6 +1468,36 @@ main {
     height: 100%;
     min-height: 0;
     max-height: 100%;
+    min-width: 400px; /* Minimum width - current size is the leftmost boundary */
+    max-width: 800px; /* Maximum width for resizing */
+    position: relative; /* For resize handle positioning */
+}
+
+/* Sidebar Resize Handle */
+.sidebar-resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 4px;
+    height: 100%;
+    cursor: col-resize;
+    background-color: transparent;
+    z-index: 10;
+    transition: background-color 0.2s ease;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.resizing {
+    background-color: var(--primary);
+}
+
+.sidebar-resize-handle::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -2px;
+    right: -2px;
+    height: 100%;
 }
 
 .explainer-right {
@@ -2247,11 +2277,13 @@ main {
     box-shadow: var(--shadow-md);
     display: flex;
     flex-direction: column;
-    max-height: 280px;
-    min-height: 180px;
+    height: 300px; /* Default height */
+    max-height: 80vh; /* Maximum height */
+    min-height: 300px; /* Minimum height - current size is the uppermost boundary */
     flex-shrink: 0;
     overflow: hidden;
     animation: slideDown 0.2s ease-out;
+    position: relative; /* For resize handle positioning */
 }
 
 .section-preview-panel.hidden {
@@ -2267,6 +2299,33 @@ main {
         opacity: 1;
         transform: translateY(0);
     }
+}
+
+/* Preview Panel Vertical Resize Handle */
+.preview-resize-handle {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    cursor: row-resize;
+    background-color: transparent;
+    z-index: 10;
+    transition: background-color 0.2s ease;
+}
+
+.preview-resize-handle:hover,
+.preview-resize-handle.resizing {
+    background-color: var(--primary);
+}
+
+.preview-resize-handle::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    left: 0;
+    width: 100%;
 }
 
 .preview-panel-header {

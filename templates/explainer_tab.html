@@ -43,7 +43,7 @@
 
     <div class="explainer-layout flex-1 overflow-hidden">
         <!-- Left Selection Panel (Sidebar) -->
-        <div class="explainer-left">
+        <div class="explainer-left" id="explainer-sidebar">
             <div id="explainer-results-container" style="display: flex; flex-direction: column; height: 100%;">
                 <div class="collapsible-header" id="selection-header" style="height: 40px; flex-shrink: 0;">
                     <div style="display: flex; align-items: center; gap: 8px;">
@@ -71,6 +71,9 @@
             
             <div id="explainer-empty-left" class="flex-1 flex flex-col items-center justify-center p-8 text-center opacity-30" style="display: none;">
             </div>
+            
+            <!-- Resize Handle -->
+            <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
         </div>
         
         <!-- Right Output -->
@@ -92,6 +95,9 @@
                 <div id="preview-content" class="preview-panel-content scroll-area">
                     <!-- Section content will be inserted here -->
                 </div>
+                
+                <!-- Vertical Resize Handle -->
+                <div class="preview-resize-handle" id="preview-resize-handle"></div>
             </div>
 
             <div class="explainer-bubble explanation-bubble flex flex-col">
@@ -104,25 +110,6 @@
                 </div>
                 <div id="explanation-output" class="explanation-content scroll-area flex-1" style="display: flex; align-items: center; justify-content: center;">
                     <p class="placeholder-text" style="text-align: center; color: var(--muted-foreground); font-size: 0.875rem;">Search for a keyword and select documents to generate an explanation.</p>
-                </div>
-            </div>
-            
-            <div class="explainer-bottom-row">
-                <div class="explainer-bubble source-chunks-bubble flex flex-col">
-                    <h3 class="bubble-title" style="padding: 12px 16px; border-bottom: 1px solid var(--border); margin: 0; display: flex; justify-content: space-between; font-size: 0.75rem;">
-                        Source Chunks
-                        <span id="chunks-count-label" style="font-weight: 400; opacity: 0.6;"></span>
-                    </h3>
-                    <div id="source-chunks-output" class="bubble-scroll-content scroll-area flex-1">
-                        <p class="placeholder-text">No source material.</p>
-                    </div>
-                </div>
-                
-                <div class="explainer-bubble metadata-bubble flex flex-col">
-                    <h3 class="bubble-title" style="padding: 12px 16px; border-bottom: 1px solid var(--border); margin: 0; font-size: 0.75rem;">Metadata</h3>
-                    <div id="metadata-output" class="bubble-scroll-content scroll-area flex-1">
-                        <p class="placeholder-text">No metadata.</p>
-                    </div>
                 </div>
             </div>
         </div>

@@ -18,8 +18,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectNoneCheckbox = document.getElementById('select-none-checkbox');
     const explainBtn = document.getElementById('explain-btn');
     const explanationOutput = document.getElementById('explanation-output');
-    const sourceChunksOutput = document.getElementById('source-chunks-output');
-    const metadataOutput = document.getElementById('metadata-output');
     const languageToggle = document.getElementById('language-toggle');
     
     // State management (replaces Gradio State)
@@ -1064,8 +1062,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const keyword = explainerKeyword.value.trim();
         const selectedChoices = getSelectedChoices();
         const genStatus = document.getElementById('gen-status');
-        const chunksOutput = document.getElementById('source-chunks-output');
-        const chunksLabel = document.getElementById('chunks-count-label');
         
         try {
             explainBtn.disabled = true;
@@ -1085,7 +1081,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                 </div>
             `;
-            chunksOutput.innerHTML = '<p class="placeholder-text">Retrieving relevant chunks...</p>';
             
             // Resolve alias to parent keyword for explanation generation
             // This ensures we use the actual keyword that exists in documents, not the alias
@@ -1131,41 +1126,6 @@ document.addEventListener('DOMContentLoaded', function() {
             explanationOutput.style.alignItems = 'stretch';
             explanationOutput.style.justifyContent = 'flex-start';
             explanationOutput.innerHTML = `<div class="generated-explanation" style="color: var(--foreground)">${renderMarkdown(result.explanation || '', 'Explanation', keyword)}</div>`;
-            
-            // Source Chunks formatting
-            const chunks = result.source_chunks ? result.source_chunks.split('\n\n').filter(c => {
-                const trimmed = c.trim();
-                // Filter out the header "### Source Chunks (X chunks used)"
-                return trimmed && !trimmed.startsWith('### Source Chunks');
-            }) : [];
-            if (chunksLabel) chunksLabel.textContent = `${chunks.length} chunks used`;
-            
-            chunksOutput.innerHTML = chunks.map((chunk, idx) => `
-                <div class="source-chunk-card">
-                    <div style="font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); opacity: 0.8; margin-bottom: 6px;">CHUNK ${idx + 1}</div>
-                    <div style="font-size: 12px; line-height: 1.5; color: rgba(0,0,0,0.7);">${chunk.replace(/^Chunk \d+:?\s*/i, '').replace(/^\*\*Chunk \d+\*\*.*?\n/i, '')}</div>
-                </div>
-            `).join('');
-
-            // Metadata formatting
-            const metaLines = result.metadata ? result.metadata.split('\n').filter(l => l.includes(': ')) : [];
-            metadataOutput.innerHTML = `
-                <div class="metadata-list">
-                    ${metaLines.map(line => {
-                        const [label, ...valParts] = line.split(': ');
-                        return `
-                            <div class="metadata-item">
-                                <span class="metadata-label">${label}</span>
-                                <span class="metadata-value">${valParts.join(': ')}</span>
-                            </div>
-                        `;
-                    }).join('')}
-                    <div class="metadata-item">
-                        <span class="metadata-label">Timestamp</span>
-                        <span class="metadata-value">${new Date().toLocaleString()}</span>
-                    </div>
-                </div>
-            `;
             
         } catch (error) {
             genStatus.textContent = "Network Error";
@@ -1581,6 +1541,115 @@ document.addEventListener('DOMContentLoaded', function() {
         renderAliases();
         addAliasKeywordDialog.classList.add('hidden');
         nameInput.value = "";
+    }
+    // Sidebar Horizontal Resize Functionality
+    const sidebar = document.querySelector('.explainer-left');
+    const sidebarResizeHandle = document.getElementById('sidebar-resize-handle');
+    
+    if (sidebar && sidebarResizeHandle) {
+        let isResizing = false;
+        let startX = 0;
+        let startWidth = 0;
+        const minWidth = 400; // Current size is minimum
+        const maxWidth = 800;
+        
+        sidebarResizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = sidebar.offsetWidth;
+            sidebarResizeHandle.classList.add('resizing');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            
+            const delta = e.clientX - startX;
+            let newWidth = startWidth + delta;
+            
+            // Constrain to min/max width
+            newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+            
+            sidebar.style.width = `${newWidth}px`;
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                sidebarResizeHandle.classList.remove('resizing');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                
+                // Save the width to sessionStorage
+                sessionStorage.setItem('explainer_sidebar_width', sidebar.offsetWidth);
+            }
+        });
+        
+        // Load saved width on page load
+        const savedWidth = sessionStorage.getItem('explainer_sidebar_width');
+        if (savedWidth) {
+            const width = parseInt(savedWidth, 10);
+            if (width >= minWidth && width <= maxWidth) {
+                sidebar.style.width = `${width}px`;
+            }
+        }
+    }
+    
+    // Preview Panel Vertical Resize Functionality
+    const previewPanel = document.getElementById('section-preview-panel');
+    const previewResizeHandle = document.getElementById('preview-resize-handle');
+    
+    if (previewPanel && previewResizeHandle) {
+        let isResizingPreview = false;
+        let startY = 0;
+        let startHeight = 0;
+        const minHeight = 300; // Current size is minimum (uppermost boundary)
+        const maxHeight = window.innerHeight * 0.8; // 80vh
+        
+        previewResizeHandle.addEventListener('mousedown', (e) => {
+            isResizingPreview = true;
+            startY = e.clientY;
+            startHeight = previewPanel.offsetHeight;
+            previewResizeHandle.classList.add('resizing');
+            document.body.style.cursor = 'row-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizingPreview) return;
+            
+            const delta = e.clientY - startY;
+            let newHeight = startHeight + delta;
+            
+            // Constrain to min/max height
+            newHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
+            
+            previewPanel.style.height = `${newHeight}px`;
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (isResizingPreview) {
+                isResizingPreview = false;
+                previewResizeHandle.classList.remove('resizing');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                
+                // Save the height to sessionStorage
+                sessionStorage.setItem('explainer_preview_height', previewPanel.offsetHeight);
+            }
+        });
+        
+        // Load saved height on page load
+        const savedHeight = sessionStorage.getItem('explainer_preview_height');
+        if (savedHeight) {
+            const height = parseInt(savedHeight, 10);
+            if (height >= minHeight && height <= maxHeight) {
+                previewPanel.style.height = `${height}px`;
+            }
+        }
     }
 });
 
