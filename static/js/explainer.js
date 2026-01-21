@@ -26,6 +26,11 @@ document.addEventListener('DOMContentLoaded', function() {
     let lastSearchKeyword = null; // Replaces last_search_keyword
     let deepSearchContext = null; // Track deep search: { originalKeyword, selectedKeyword }
     
+    // Hierarchical view state
+    let expandedDocs = new Set(); // Track which documents are expanded
+    let activePreviewId = null; // Track which section is being previewed
+    let groupedResults = {}; // { docName: [{ choice, storeItem, index }] }
+    
     // Alias management state
     const aliasState = {
         keywords: [],
@@ -547,86 +552,375 @@ document.addEventListener('DOMContentLoaded', function() {
     
     function renderCheckboxes(choices) {
         explainerResultsCheckboxes.innerHTML = '';
+        groupedResults = {};
         
         if (!choices || choices.length === 0) {
+            expandedDocs.clear();
+            activePreviewId = null;
+            closePreviewPanel();
             return;
         }
         
+        // Group choices by document name
+        // Choice format from API: "DocName → SectionHeading"
         choices.forEach((choice, index) => {
-            const documentItem = document.createElement('div');
-            documentItem.className = 'document-item explainer-item';
-            documentItem.style.padding = '10px 12px';
-            documentItem.style.cursor = 'pointer';
+            const storeItem = storedResults[index];
             
-            const checkboxContainer = document.createElement('div');
-            checkboxContainer.className = 'custom-checkbox';
-            checkboxContainer.style.marginRight = '12px';
+            // Parse choice string: "DocName → SectionHeading"
+            const parts = choice.split(' → ');
+            const docName = parts[0] || 'Unknown Document';
+            const sectionTitle = parts.length > 1 ? parts.slice(1).join(' → ') : choice;
             
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.id = `checkbox-${index}`;
-            checkbox.value = choice;
-            checkbox.name = 'explainer-choice';
-            checkbox.style.display = 'none'; // Hidden, used for state
-            
-            // Visual Square icon
-            const icon = document.createElement('div');
-            icon.className = 'checkbox-icon';
-            icon.innerHTML = `<img src="/static/icons/file.svg" width="16" height="16" style="opacity:0.3;">`; // Default empty state
-            
-            const label = document.createElement('span');
-            label.style.fontSize = '0.8125rem';
-            label.style.fontWeight = '500';
-            label.textContent = choice;
-            
-            documentItem.appendChild(checkbox);
-            documentItem.appendChild(icon);
-            documentItem.appendChild(label);
-            
-            documentItem.addEventListener('click', () => {
-                checkbox.checked = !checkbox.checked;
-                updateItemVisualState(documentItem, checkbox.checked);
-                updateGenerateButtonState();
-                updateSelectAllNoneState();
+            if (!groupedResults[docName]) {
+                groupedResults[docName] = [];
+            }
+            groupedResults[docName].push({
+                choice: choice,
+                storeItem: storeItem,
+                index: index,
+                sectionTitle: sectionTitle
             });
-
-            documentItem.addEventListener('mouseenter', () => {
-                documentItem.style.background = 'var(--muted)';
-            });
-            documentItem.addEventListener('mouseleave', () => {
-                if (!checkbox.checked) documentItem.style.background = 'transparent';
+        });
+        
+        // Render hierarchical structure
+        Object.keys(groupedResults).forEach(docName => {
+            const sections = groupedResults[docName];
+            const docId = `doc-${hashString(docName)}`;
+            
+            // Document row
+            const docRow = document.createElement('div');
+            docRow.className = 'doc-row';
+            docRow.dataset.docId = docId;
+            
+            // Document header
+            const docHeader = document.createElement('div');
+            docHeader.className = 'doc-row-header';
+            
+            // Chevron
+            const chevron = document.createElement('img');
+            chevron.src = '/static/icons/chevron-right.svg';
+            chevron.className = `doc-row-chevron ${expandedDocs.has(docId) ? 'expanded' : ''}`;
+            chevron.onclick = (e) => {
+                e.stopPropagation();
+                toggleDocExpanded(docId);
+            };
+            
+            // Document checkbox
+            const docCheckbox = document.createElement('input');
+            docCheckbox.type = 'checkbox';
+            docCheckbox.className = 'doc-row-checkbox';
+            docCheckbox.id = `doc-checkbox-${docId}`;
+            docCheckbox.onclick = (e) => {
+                e.stopPropagation();
+                toggleDocumentSelection(docId, docCheckbox.checked);
+            };
+            
+            // File icon
+            const fileIcon = document.createElement('img');
+            fileIcon.src = '/static/icons/file.svg';
+            fileIcon.className = 'doc-row-icon';
+            
+            // Document name
+            const docNameSpan = document.createElement('span');
+            docNameSpan.className = 'doc-row-name';
+            docNameSpan.textContent = formatDocName(docName);
+            docNameSpan.title = docName;
+            
+            // Selection count
+            const countSpan = document.createElement('span');
+            countSpan.className = 'doc-row-count';
+            countSpan.id = `doc-count-${docId}`;
+            countSpan.textContent = `(0/${sections.length})`;
+            
+            docHeader.appendChild(chevron);
+            docHeader.appendChild(docCheckbox);
+            docHeader.appendChild(fileIcon);
+            docHeader.appendChild(docNameSpan);
+            docHeader.appendChild(countSpan);
+            
+            // Click on header row to toggle expand
+            docHeader.onclick = () => toggleDocExpanded(docId);
+            
+            docRow.appendChild(docHeader);
+            
+            // Sections container
+            const sectionsContainer = document.createElement('div');
+            sectionsContainer.className = `doc-sections ${expandedDocs.has(docId) ? 'expanded' : ''}`;
+            sectionsContainer.id = `sections-${docId}`;
+            
+            sections.forEach((item, sectionIdx) => {
+                const sectionId = `section-${item.index}`;
+                
+                const sectionRow = document.createElement('div');
+                sectionRow.className = 'section-row';
+                sectionRow.dataset.sectionId = sectionId;
+                sectionRow.dataset.docId = docId;
+                sectionRow.dataset.index = item.index;
+                
+                if (activePreviewId === sectionId) {
+                    sectionRow.classList.add('preview-active');
+                }
+                
+                // Section checkbox
+                const sectionCheckbox = document.createElement('input');
+                sectionCheckbox.type = 'checkbox';
+                sectionCheckbox.className = 'section-row-checkbox';
+                sectionCheckbox.id = `checkbox-${item.index}`;
+                sectionCheckbox.value = item.choice;
+                sectionCheckbox.name = 'explainer-choice';
+                sectionCheckbox.onclick = (e) => {
+                    e.stopPropagation();
+                    updateSectionSelection(sectionRow, sectionCheckbox.checked);
+                    updateDocCheckboxState(docId);
+                    updateGenerateButtonState();
+                    updateSelectAllNoneState();
+                };
+                
+                // Section title
+                const sectionTitle = document.createElement('span');
+                sectionTitle.className = 'section-row-title';
+                sectionTitle.textContent = item.sectionTitle;
+                sectionTitle.title = item.choice;
+                
+                // Preview button
+                const previewBtn = document.createElement('button');
+                previewBtn.className = `preview-btn ${activePreviewId === sectionId ? 'active' : ''}`;
+                previewBtn.innerHTML = `
+                    <img src="/static/icons/eye.svg" width="12" height="12">
+                    <span>Preview</span>
+                `;
+                previewBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    // Get content from store item, fallback to section title
+                    const previewContent = item.storeItem?.content || `Section: ${item.sectionTitle}\n\nNo content preview available.`;
+                    const previewDocName = item.storeItem?.doc_name || docName;
+                    togglePreview(sectionId, previewDocName, item.sectionTitle, previewContent);
+                };
+                
+                sectionRow.appendChild(sectionCheckbox);
+                sectionRow.appendChild(sectionTitle);
+                sectionRow.appendChild(previewBtn);
+                
+                // Click on row to toggle checkbox
+                sectionRow.onclick = () => {
+                    sectionCheckbox.checked = !sectionCheckbox.checked;
+                    updateSectionSelection(sectionRow, sectionCheckbox.checked);
+                    updateDocCheckboxState(docId);
+                    updateGenerateButtonState();
+                    updateSelectAllNoneState();
+                };
+                
+                sectionsContainer.appendChild(sectionRow);
             });
             
-            explainerResultsCheckboxes.appendChild(documentItem);
+            docRow.appendChild(sectionsContainer);
+            explainerResultsCheckboxes.appendChild(docRow);
         });
         
         // Reset select all/none checkboxes
         selectAllCheckbox.checked = false;
         selectNoneCheckbox.checked = false;
     }
-
-    function updateItemVisualState(element, isChecked) {
-        const icon = element.querySelector('.checkbox-icon');
-        if (isChecked) {
-            element.style.background = 'rgba(239, 68, 68, 0.05)';
-            element.style.color = 'var(--primary)';
-            icon.innerHTML = `<img src="/static/icons/success.svg" width="16" height="16" style="filter: invert(32%) sepia(85%) saturate(2853%) hue-rotate(345deg) brightness(101%) contrast(89%);">`;
-        } else {
-            element.style.background = 'transparent';
-            element.style.color = 'inherit';
-            icon.innerHTML = `<img src="/static/icons/file.svg" width="16" height="16" style="opacity:0.3;">`;
+    
+    // Helper functions for hierarchical view
+    function hashString(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
         }
+        return Math.abs(hash).toString(36);
+    }
+    
+    function formatDocName(docName) {
+        // Truncate long document names for display
+        if (docName.length > 40) {
+            return docName.substring(0, 37) + '...';
+        }
+        return docName;
+    }
+    
+    function toggleDocExpanded(docId) {
+        if (expandedDocs.has(docId)) {
+            expandedDocs.delete(docId);
+        } else {
+            expandedDocs.add(docId);
+        }
+        
+        const sectionsContainer = document.getElementById(`sections-${docId}`);
+        const chevron = document.querySelector(`[data-doc-id="${docId}"] .doc-row-chevron`);
+        
+        if (sectionsContainer) {
+            sectionsContainer.classList.toggle('expanded', expandedDocs.has(docId));
+        }
+        if (chevron) {
+            chevron.classList.toggle('expanded', expandedDocs.has(docId));
+        }
+    }
+    
+    function toggleDocumentSelection(docId, selected) {
+        const sectionsContainer = document.getElementById(`sections-${docId}`);
+        if (!sectionsContainer) return;
+        
+        const sectionRows = sectionsContainer.querySelectorAll('.section-row');
+        sectionRows.forEach(row => {
+            const checkbox = row.querySelector('.section-row-checkbox');
+            if (checkbox) {
+                checkbox.checked = selected;
+                updateSectionSelection(row, selected);
+            }
+        });
+        
+        updateDocCheckboxState(docId);
+        updateGenerateButtonState();
+        updateSelectAllNoneState();
+    }
+    
+    function updateSectionSelection(row, selected) {
+        if (selected) {
+            row.classList.add('selected');
+        } else {
+            row.classList.remove('selected');
+        }
+    }
+    
+    function updateDocCheckboxState(docId) {
+        const docCheckbox = document.getElementById(`doc-checkbox-${docId}`);
+        const countSpan = document.getElementById(`doc-count-${docId}`);
+        const sectionsContainer = document.getElementById(`sections-${docId}`);
+        
+        if (!sectionsContainer || !docCheckbox) return;
+        
+        const checkboxes = sectionsContainer.querySelectorAll('.section-row-checkbox');
+        const checkedCount = sectionsContainer.querySelectorAll('.section-row-checkbox:checked').length;
+        const totalCount = checkboxes.length;
+        
+        // Update count display
+        if (countSpan) {
+            countSpan.textContent = `(${checkedCount}/${totalCount})`;
+        }
+        
+        // Update document checkbox state
+        if (checkedCount === 0) {
+            docCheckbox.checked = false;
+            docCheckbox.indeterminate = false;
+            docCheckbox.classList.remove('partial');
+        } else if (checkedCount === totalCount) {
+            docCheckbox.checked = true;
+            docCheckbox.indeterminate = false;
+            docCheckbox.classList.remove('partial');
+        } else {
+            docCheckbox.checked = false;
+            docCheckbox.indeterminate = true;
+            docCheckbox.classList.add('partial');
+        }
+    }
+    
+    // Preview functions
+    function togglePreview(sectionId, docName, sectionTitle, content) {
+        const previewPanel = document.getElementById('section-preview-panel');
+        const explainerRight = document.querySelector('.explainer-right');
+        
+        if (activePreviewId === sectionId) {
+            // Close preview
+            closePreviewPanel();
+        } else {
+            // Open/switch preview
+            activePreviewId = sectionId;
+            
+            // Update preview panel content
+            document.getElementById('preview-doc-name').textContent = docName;
+            document.getElementById('preview-section-title').textContent = sectionTitle;
+            document.getElementById('preview-content').innerHTML = formatPreviewContent(content);
+            
+            // Show panel
+            previewPanel.classList.remove('hidden');
+            explainerRight.classList.add('preview-open');
+            
+            // Update active state in sidebar
+            updatePreviewActiveState();
+        }
+    }
+    
+    function closePreviewPanel() {
+        const previewPanel = document.getElementById('section-preview-panel');
+        const explainerRight = document.querySelector('.explainer-right');
+        
+        activePreviewId = null;
+        
+        if (previewPanel) {
+            previewPanel.classList.add('hidden');
+        }
+        if (explainerRight) {
+            explainerRight.classList.remove('preview-open');
+        }
+        
+        updatePreviewActiveState();
+    }
+    
+    function updatePreviewActiveState() {
+        // Remove active state from all sections and preview buttons
+        document.querySelectorAll('.section-row').forEach(row => {
+            row.classList.remove('preview-active');
+            const btn = row.querySelector('.preview-btn');
+            if (btn) btn.classList.remove('active');
+        });
+        
+        // Add active state to current preview section
+        if (activePreviewId) {
+            const activeRow = document.querySelector(`[data-section-id="${activePreviewId}"]`);
+            if (activeRow) {
+                activeRow.classList.add('preview-active');
+                const btn = activeRow.querySelector('.preview-btn');
+                if (btn) btn.classList.add('active');
+            }
+        }
+    }
+    
+    function formatPreviewContent(content) {
+        if (!content) return '<p class="placeholder-text">No content available.</p>';
+        
+        // Basic formatting: convert newlines to paragraphs
+        const paragraphs = content.split(/\n\n+/).filter(p => p.trim());
+        if (paragraphs.length === 0) {
+            return `<p>${escapeHtml(content)}</p>`;
+        }
+        return paragraphs.map(p => `<p>${escapeHtml(p.trim())}</p>`).join('');
+    }
+    
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    // Initialize close preview button
+    const closePreviewBtn = document.getElementById('close-preview-btn');
+    if (closePreviewBtn) {
+        closePreviewBtn.addEventListener('click', closePreviewPanel);
     }
 
     function handleSelectAll() {
         if (selectAllCheckbox.checked) {
             selectNoneCheckbox.checked = false;
-            const items = explainerResultsCheckboxes.querySelectorAll('.document-item');
-            items.forEach(item => {
-                const cb = item.querySelector('input');
-                cb.checked = true;
-                updateItemVisualState(item, true);
+            
+            // Select all sections in all documents
+            const sectionRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
+            sectionRows.forEach(row => {
+                const checkbox = row.querySelector('.section-row-checkbox');
+                if (checkbox) {
+                    checkbox.checked = true;
+                    updateSectionSelection(row, true);
+                }
             });
+            
+            // Update all document checkboxes
+            Object.keys(groupedResults).forEach(docName => {
+                const docId = `doc-${hashString(docName)}`;
+                updateDocCheckboxState(docId);
+            });
+            
             updateGenerateButtonState();
         }
     }
@@ -634,18 +928,29 @@ document.addEventListener('DOMContentLoaded', function() {
     function handleSelectNone() {
         if (selectNoneCheckbox.checked) {
             selectAllCheckbox.checked = false;
-            const items = explainerResultsCheckboxes.querySelectorAll('.document-item');
-            items.forEach(item => {
-                const cb = item.querySelector('input');
-                cb.checked = false;
-                updateItemVisualState(item, false);
+            
+            // Deselect all sections in all documents
+            const sectionRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
+            sectionRows.forEach(row => {
+                const checkbox = row.querySelector('.section-row-checkbox');
+                if (checkbox) {
+                    checkbox.checked = false;
+                    updateSectionSelection(row, false);
+                }
             });
+            
+            // Update all document checkboxes
+            Object.keys(groupedResults).forEach(docName => {
+                const docId = `doc-${hashString(docName)}`;
+                updateDocCheckboxState(docId);
+            });
+            
             updateGenerateButtonState();
         }
     }
     
     function getSelectedChoices() {
-        const checkboxes = explainerResultsCheckboxes.querySelectorAll('input[type="checkbox"][name="explainer-choice"]:checked');
+        const checkboxes = explainerResultsCheckboxes.querySelectorAll('.section-row-checkbox:checked');
         return Array.from(checkboxes).map(cb => cb.value);
     }
     
@@ -767,8 +1072,8 @@ document.addEventListener('DOMContentLoaded', function() {
     
     
     function updateSelectAllNoneState() {
-        const checkboxes = explainerResultsCheckboxes.querySelectorAll('input[type="checkbox"][name="explainer-choice"]');
-        const checkedCount = explainerResultsCheckboxes.querySelectorAll('input[type="checkbox"][name="explainer-choice"]:checked').length;
+        const checkboxes = explainerResultsCheckboxes.querySelectorAll('.section-row-checkbox');
+        const checkedCount = explainerResultsCheckboxes.querySelectorAll('.section-row-checkbox:checked').length;
         const totalCount = checkboxes.length;
 
         // Update sticky badge
@@ -777,7 +1082,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         if (checkedCount === 0) {
             selectAllCheckbox.checked = false;
-            selectNoneCheckbox.checked = false;
+            selectNoneCheckbox.checked = true;
         } else if (checkedCount === totalCount) {
             selectAllCheckbox.checked = true;
             selectNoneCheckbox.checked = false;

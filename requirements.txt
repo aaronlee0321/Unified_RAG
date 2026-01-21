@@ -33,4 +33,3 @@ cohere>=4.0.0
 
 # Free LLM options
 google-genai>=0.2.0  # For Google Gemini (FREE tier)
-

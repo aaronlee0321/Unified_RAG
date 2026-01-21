@@ -68,6 +68,7 @@ def search_for_explainer(keyword: str) -> Dict[str, Any]:
                 doc_id = r.get('doc_id')
                 doc_name = r.get('doc_name', 'Unknown Document')
                 section = r.get('section_heading')
+                content = r.get('content', '')
                 
                 # Skip items without a section heading
                 if not section or section.strip() == '':
@@ -81,6 +82,7 @@ def search_for_explainer(keyword: str) -> Dict[str, Any]:
                         'doc_id': doc_id,
                         'doc_name': doc_name,
                         'section_heading': section,
+                        'content': content,
                         'relevance': r.get('relevance', 0.0)
                     }
             except Exception as e:
@@ -123,10 +125,12 @@ def search_for_explainer(keyword: str) -> Dict[str, Any]:
                 choice_label = f"{display_name} → {section_display}"
                 choices.append(choice_label)
                 
-                # Store actual data
+                # Store actual data including content for preview
                 store_data.append({
                     'doc_id': item['doc_id'],
-                    'section_heading': item['section_heading']
+                    'doc_name': display_name,
+                    'section_heading': item['section_heading'],
+                    'content': item.get('content', '')
                 })
             except Exception as e:
                 logger.error(f"[SEARCH FOR EXPLAINER] Error creating choice for item {idx}: {e}")

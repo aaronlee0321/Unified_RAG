@@ -57,3 +57,5 @@ chunks/**/*.json
 
 # Ignore Tank War assets (directory with space)
 Tank War/
+tank_online_1-dev/
+

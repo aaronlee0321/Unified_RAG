@@ -2078,3 +2078,259 @@ main {
     color: var(--primary);
     border-bottom: 2px solid var(--primary);
 }
+
+/* ====== Hierarchical Search Results ====== */
+
+/* Document row (parent) */
+.doc-row {
+    border-bottom: 1px solid var(--border);
+}
+
+.doc-row-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.doc-row-header:hover {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.doc-row-chevron {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+    opacity: 0.5;
+}
+
+.doc-row-chevron.expanded {
+    transform: rotate(90deg);
+}
+
+.doc-row-checkbox {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    cursor: pointer;
+    accent-color: var(--primary);
+}
+
+.doc-row-checkbox.partial {
+    opacity: 0.6;
+}
+
+.doc-row-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+
+.doc-row-name {
+    flex: 1;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.doc-row-count {
+    font-size: 0.7rem;
+    color: var(--muted-foreground);
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+/* Section rows (children) */
+.doc-sections {
+    background: rgba(0, 0, 0, 0.015);
+    display: none;
+}
+
+.doc-sections.expanded {
+    display: block;
+}
+
+.section-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px 8px 40px;
+    transition: background 0.15s;
+}
+
+.section-row:hover {
+    background: rgba(0, 0, 0, 0.03);
+}
+
+.section-row.preview-active {
+    background: rgba(251, 191, 36, 0.1);
+}
+
+.section-row-checkbox {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    cursor: pointer;
+    accent-color: var(--primary);
+}
+
+.section-row-title {
+    flex: 1;
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.section-row.selected .section-row-title {
+    color: var(--foreground);
+}
+
+/* Preview button */
+.preview-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    height: 24px;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+
+.preview-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--foreground);
+}
+
+.preview-btn.active {
+    background: rgba(251, 191, 36, 0.2);
+    color: #b45309;
+}
+
+.preview-btn.active:hover {
+    background: rgba(251, 191, 36, 0.3);
+}
+
+.preview-btn img {
+    width: 12px;
+    height: 12px;
+    opacity: 0.6;
+}
+
+.preview-btn.active img {
+    opacity: 1;
+    filter: invert(35%) sepia(98%) saturate(1000%) hue-rotate(15deg) brightness(95%);
+}
+
+/* ====== Section Preview Panel ====== */
+
+.section-preview-panel {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    display: flex;
+    flex-direction: column;
+    max-height: 280px;
+    min-height: 180px;
+    flex-shrink: 0;
+    overflow: hidden;
+    animation: slideDown 0.2s ease-out;
+}
+
+.section-preview-panel.hidden {
+    display: none;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.preview-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(251, 191, 36, 0.05);
+    flex-shrink: 0;
+}
+
+.preview-panel-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+}
+
+.preview-panel-title-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.preview-doc-name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.preview-section-title {
+    font-size: 0.7rem;
+    color: var(--muted-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.preview-panel-content {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--foreground);
+    min-height: 0;
+}
+
+.preview-panel-content p {
+    margin: 0 0 0.75em 0;
+}
+
+.preview-panel-content p:last-child {
+    margin-bottom: 0;
+}
+
+/* When preview is open, adjust explanation bubble */
+.explainer-right.preview-open .explanation-bubble {
+    flex: 1;
+    min-height: 0;
+}
