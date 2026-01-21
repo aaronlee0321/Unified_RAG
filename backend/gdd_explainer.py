@@ -66,13 +66,21 @@ def _process_search_results(results: List[Dict], keyword: str, progress_messages
                 continue
 
             key = (doc_id, doc_name, section)
-            if key not in doc_sections:
+            chunk_id = result.get('chunk_id', '')
+
+            # If we already have this section, keep the chunk_id with lowest alphabetical order
+            if key in doc_sections:
+                existing_chunk_id = doc_sections[key].get('chunk_id', '')
+                if chunk_id and (not existing_chunk_id or chunk_id < existing_chunk_id):
+                    doc_sections[key]['chunk_id'] = chunk_id
+            else:
                 doc_sections[key] = {
                     'doc_id': doc_id,
                     'doc_name': doc_name,
                     'section_heading': section,
                     'content': result.get('content', ''),
-                    'relevance': result.get('relevance', 0.0)
+                    'relevance': result.get('relevance', 0.0),
+                    'chunk_id': chunk_id
                 }
         except Exception as e:
             logger.error(f"Error processing result: {e}", exc_info=True)
@@ -98,7 +106,8 @@ def _process_search_results(results: List[Dict], keyword: str, progress_messages
                 'doc_id': item['doc_id'],
                 'doc_name': display_name,
                 'section_heading': item['section_heading'],
-                'content': item.get('content', '')
+                'content': item.get('content', ''),
+                'chunk_id': item.get('chunk_id', '')
             })
         except Exception as e:
             logger.error(f"Error creating choice: {e}", exc_info=True)

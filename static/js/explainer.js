@@ -596,7 +596,15 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Render hierarchical structure
         Object.keys(groupedResults).forEach(docName => {
-            const sections = groupedResults[docName];
+            let sections = groupedResults[docName];
+            
+            // Sort sections alphabetically by chunk_id within each document
+            sections.sort((a, b) => {
+                const chunkIdA = a.storeItem?.chunk_id || '';
+                const chunkIdB = b.storeItem?.chunk_id || '';
+                return chunkIdA.localeCompare(chunkIdB);
+            });
+            
             const docId = `doc-${hashString(docName)}`;
             
             // Document row
@@ -703,10 +711,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 `;
                 previewBtn.onclick = (e) => {
                     e.stopPropagation();
-                    // Get content from store item, fallback to section title
-                    const previewContent = item.storeItem?.content || `Section: ${item.sectionTitle}\n\nNo content preview available.`;
+                    // Get doc_id and section_heading from store item
                     const previewDocName = item.storeItem?.doc_name || docName;
-                    togglePreview(sectionId, previewDocName, item.sectionTitle, previewContent);
+                    const docId = item.storeItem?.doc_id || '';
+                    const sectionHeading = item.storeItem?.section_heading || item.sectionTitle;
+                    const previewContent = item.storeItem?.content || ''; // Fallback, but won't be used
+                    togglePreview(sectionId, previewDocName, item.sectionTitle, previewContent, docId, sectionHeading);
                 };
                 
                 sectionRow.appendChild(sectionCheckbox);
@@ -830,9 +840,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Preview functions
-    function togglePreview(sectionId, docName, sectionTitle, content) {
+    async function togglePreview(sectionId, docName, sectionTitle, content, docId, sectionHeading) {
         const previewPanel = document.getElementById('section-preview-panel');
         const explainerRight = document.querySelector('.explainer-right');
+        const previewContent = document.getElementById('preview-content');
         
         if (activePreviewId === sectionId) {
             // Close preview
@@ -841,10 +852,17 @@ document.addEventListener('DOMContentLoaded', function() {
             // Open/switch preview
             activePreviewId = sectionId;
             
-            // Update preview panel content
+            // Update preview panel header
             document.getElementById('preview-doc-name').textContent = docName;
             document.getElementById('preview-section-title').textContent = sectionTitle;
-            document.getElementById('preview-content').innerHTML = formatPreviewContent(content);
+            
+            // Show loading state (matching v0 style)
+            previewContent.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; gap: 12px;">
+                    <div class="spinner" style="width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                    <p style="font-size: 0.875rem; color: var(--muted-foreground); margin: 0;">Generating summary...</p>
+                </div>
+            `;
             
             // Show panel
             previewPanel.classList.remove('hidden');
@@ -852,6 +870,31 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Update active state in sidebar
             updatePreviewActiveState();
+            
+            // Fetch LLM summary
+            try {
+                const response = await fetch('/api/gdd/explainer/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        doc_id: docId,
+                        section_heading: sectionHeading,
+                        doc_name: docName
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success && result.summary) {
+                    // Format and display the summary (similar to chatbox response)
+                    previewContent.innerHTML = formatPreviewContent(result.summary);
+                } else {
+                    previewContent.innerHTML = `<p class="placeholder-text" style="color: var(--status-error);">Error: ${result.error || 'Failed to generate summary'}</p>`;
+                }
+            } catch (error) {
+                console.error('Error fetching preview:', error);
+                previewContent.innerHTML = `<p class="placeholder-text" style="color: var(--status-error);">Error: ${error.message}</p>`;
+            }
         }
     }
     
@@ -893,12 +936,31 @@ document.addEventListener('DOMContentLoaded', function() {
     function formatPreviewContent(content) {
         if (!content) return '<p class="placeholder-text">No content available.</p>';
         
-        // Basic formatting: convert newlines to paragraphs
-        const paragraphs = content.split(/\n\n+/).filter(p => p.trim());
+        // Format markdown-like content (similar to chatbox response)
+        let html = escapeHtml(content);
+        
+        // Convert markdown bold (**text**)
+        html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        
+        // Convert headers
+        html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+        html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+        html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+        
+        // Convert line breaks to paragraphs
+        const paragraphs = html.split(/\n\n+/).filter(p => p.trim());
         if (paragraphs.length === 0) {
-            return `<p>${escapeHtml(content)}</p>`;
+            return `<p>${html}</p>`;
         }
-        return paragraphs.map(p => `<p>${escapeHtml(p.trim())}</p>`).join('');
+        
+        // Wrap each paragraph, but preserve headers
+        return paragraphs.map(p => {
+            const trimmed = p.trim();
+            if (trimmed.startsWith('<h')) {
+                return trimmed;
+            }
+            return `<p>${trimmed}</p>`;
+        }).join('');
     }
     
     function escapeHtml(text) {

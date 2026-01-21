@@ -1022,6 +1022,109 @@ def deep_search():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/gdd/explainer/preview', methods=['POST'])
+def explainer_preview():
+    """Generate LLM summary for a document section preview"""
+    try:
+        from backend.storage.gdd_supabase_storage import get_gdd_top_chunks_supabase
+        from backend.services.llm_provider import SimpleLLMProvider
+        from backend.gdd_query_parser import parse_section_targets
+
+        data = request.get_json()
+        doc_id = data.get('doc_id', '').strip()
+        section_heading = data.get('section_heading', '').strip()
+        doc_name = data.get('doc_name', '').strip()
+
+        if not doc_id:
+            return jsonify({'error': 'doc_id is required', 'success': False}), 400
+
+        if not section_heading:
+            return jsonify({'error': 'section_heading is required', 'success': False}), 400
+
+        # Initialize LLM provider
+        try:
+            provider = SimpleLLMProvider()
+        except Exception as e:
+            return jsonify({
+                'error': f'Could not initialize LLM provider: {str(e)}',
+                'success': False
+            }), 500
+
+        # Create a query that will retrieve chunks from this specific section
+        # Use section_heading as the filter
+        query = f"Summarize the content of section '{section_heading}'"
+
+        # Get chunks filtered by section
+        markdown_chunks, retrieval_metrics = get_gdd_top_chunks_supabase(
+            doc_ids=[doc_id],
+            question=query,
+            provider=provider,
+            top_k=10,  # Get more chunks for better summary
+            per_doc_limit=10,
+            use_hyde=True,
+            section_path_filter=section_heading,  # Filter by section
+            numbered_header_filter=None
+        )
+
+        if not markdown_chunks:
+            return jsonify({
+                'summary': f'No content found for section "{section_heading}" in document "{doc_name or doc_id}".',
+                'success': True
+            })
+
+        # Build prompt for summarization
+        chunk_texts_with_sections = []
+        for i, chunk in enumerate(markdown_chunks):
+            section_info = ""
+            if chunk.get('numbered_header'):
+                section_info = f" [Section: {chunk.get('numbered_header')}]"
+            elif chunk.get('section_path'):
+                section_info = f" [Section: {chunk.get('section_path')}]"
+            
+            chunk_texts_with_sections.append(
+                f"[Chunk {i+1}]{section_info}\n{chunk['content']}"
+            )
+
+        chunk_texts_enhanced = "\n\n".join(chunk_texts_with_sections)
+
+        # Detect language from chunks
+        detected_language = None
+        if retrieval_metrics and 'language_detection' in retrieval_metrics:
+            lang_info = retrieval_metrics.get('language_detection', {})
+            detected_language = lang_info.get('detected_language', None)
+
+        # Determine response language instruction
+        if detected_language == 'vi' or detected_language == 'vietnamese':
+            language_instruction = "IMPORTANT: Respond in Vietnamese (Tiếng Việt). Your entire summary must be in Vietnamese."
+        else:
+            language_instruction = "IMPORTANT: Respond in English. Your entire summary must be in English."
+
+        # Create summarization prompt
+        prompt = f"""Based on the following document chunks from section "{section_heading}" in document "{doc_name or doc_id}", provide a comprehensive summary of this section.
+
+{language_instruction}
+
+Chunks:
+{chunk_texts_enhanced}
+
+Provide a clear, comprehensive summary of this section. Include all key information, concepts, and details. Format your response in a readable way with proper paragraphs."""
+
+        summary = provider.llm(prompt)
+
+        return jsonify({
+            'summary': summary,
+            'success': True
+        })
+
+    except Exception as e:
+        import traceback
+        app.logger.error(f"Error in explainer preview: {e}\n{traceback.format_exc()}")
+        return jsonify({
+            'error': str(e),
+            'success': False
+        }), 500
+
+
 @app.route('/api/code/query', methods=['POST'])
 def code_query():
     """Handle Code Q&A queries"""

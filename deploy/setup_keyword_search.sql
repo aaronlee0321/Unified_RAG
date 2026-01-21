@@ -16,7 +16,8 @@ RETURNS TABLE (
     doc_name TEXT,
     content TEXT,
     section_heading TEXT,
-    relevance REAL
+    relevance REAL,
+    chunk_id TEXT
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -25,7 +26,8 @@ BEGIN
         kd.name AS doc_name,
         kc.content,
         kc.section_heading,
-        ts_rank(to_tsvector('english', kc.content), plainto_tsquery('english', search_query)) AS relevance
+        ts_rank(to_tsvector('english', kc.content), plainto_tsquery('english', search_query)) AS relevance,
+        kc.chunk_id
     FROM keyword_chunks kc
     JOIN keyword_documents kd ON kc.doc_id = kd.doc_id
     WHERE 
