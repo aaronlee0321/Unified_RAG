@@ -4,6 +4,7 @@ Uses section-based chunk retrieval with sequential LLM processing for comprehens
 """
 from typing import List, Dict, Optional, Any, Tuple
 import re
+import time
 from backend.storage.supabase_client import get_supabase_client
 from backend.storage.keyword_storage import list_keyword_documents
 from backend.services.search_service import keyword_search
@@ -437,16 +438,25 @@ Chunks:
         # Generate explanation using LLM with max_tokens to ensure complete responses
         try:
             provider = SimpleLLMProvider()
+            llm_start_time = time.perf_counter()
             explanation = provider.llm(
                 prompt, temperature=0.3, max_tokens=3000)
+            llm_end_time = time.perf_counter()
+            section_timing = round(llm_end_time - llm_start_time, 2)
 
             # Post-process: Remove statements about missing information
             explanation = _filter_missing_info_statements(explanation)
+
+            # Create section label for timing display
+            doc_name = doc_name_map.get(doc_id, doc_id)
+            section_label = f"{doc_name} → {section_heading or '(No section)'}"
 
             return {
                 'explanation': explanation,
                 'source_chunks': selected_chunks,
                 'citations': citation_map,
+                'section_timing': section_timing,
+                'section_label': section_label,
                 'error': None
             }
         except Exception as e:
@@ -489,8 +499,12 @@ def explain_keyword(
         # Step 1: HYDE query expansion (optional)
         hyde_query = keyword
         hyde_timing = {}
+        hyde_expansion_time = 0.0
         if use_hyde:
+            hyde_start_time = time.perf_counter()
             hyde_query, hyde_timing = hyde_expand_query(keyword)
+            hyde_end_time = time.perf_counter()
+            hyde_expansion_time = round(hyde_end_time - hyde_start_time, 2)
 
         # Step 2: Group selected items by unique (doc_id, section_heading) combinations
         unique_sections = []
@@ -546,6 +560,7 @@ def explain_keyword(
         all_citations = {}
         citation_offset = 0
         errors = []
+        section_timings = []
 
         # Sort sections by doc_id, then section_heading for consistent ordering
         unique_sections.sort(key=lambda x: (
@@ -577,6 +592,13 @@ def explain_keyword(
                     'source_chunks': result.get('source_chunks', [])
                 })
 
+            # Collect section timing if available
+            if result.get('section_timing') is not None and result.get('section_label'):
+                section_timings.append({
+                    'label': result['section_label'],
+                    'time': result['section_timing']
+                })
+
             # Collect source chunks
             all_source_chunks.extend(result.get('source_chunks', []))
 
@@ -600,6 +622,7 @@ def explain_keyword(
 
         # Combine explanations: renumber sections sequentially
         # Use regex to find and renumber all section headers (format: "1. Section Title")
+        formatting_start_time = time.perf_counter()
         section_number = 1
         combined_parts = []
 
@@ -634,6 +657,8 @@ def explain_keyword(
 
         # Post-process: Remove statements about missing information from combined explanation
         final_explanation = _filter_missing_info_statements(final_explanation)
+        formatting_end_time = time.perf_counter()
+        formatting_time = round(formatting_end_time - formatting_start_time, 2)
 
         return {
             'explanation': final_explanation,
@@ -643,7 +668,12 @@ def explain_keyword(
             'hyde_timing': hyde_timing,
             'chunks_used': len(all_source_chunks),
             'citations': all_citations,
-            'error': '; '.join(errors) if errors else None
+            'error': '; '.join(errors) if errors else None,
+            'timing_metadata': {
+                'hyde_expansion_time': hyde_expansion_time,
+                'section_timings': section_timings,
+                'formatting_time': formatting_time
+            }
         }
 
     except Exception as e:

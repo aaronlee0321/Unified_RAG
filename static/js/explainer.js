@@ -414,8 +414,8 @@ document.addEventListener('DOMContentLoaded', function() {
             document.head.appendChild(style);
             
             const closeModal = (result) => {
-                document.body.removeChild(modal);
-                document.head.removeChild(style);
+                    document.body.removeChild(modal);
+                    document.head.removeChild(style);
                 resolve(result);
             };
             
@@ -1103,7 +1103,29 @@ document.addEventListener('DOMContentLoaded', function() {
             explanationOutput.style.display = 'block';
             explanationOutput.style.alignItems = 'stretch';
             explanationOutput.style.justifyContent = 'flex-start';
-            explanationOutput.innerHTML = `<div class="generated-explanation" style="color: var(--foreground)">${renderMarkdown(result.explanation || '', 'Explanation', keyword)}</div>`;
+            
+            // Build timing breakdown if available
+            let timingHTML = '';
+            if (result.timing_metadata) {
+                timingHTML = buildTimingBreakdown(result.timing_metadata);
+            }
+            
+            explanationOutput.innerHTML = timingHTML + `<div class="generated-explanation" style="color: var(--foreground)">${renderMarkdown(result.explanation || '', 'Explanation', keyword)}</div>`;
+            
+            // Add toggle functionality for timing breakdown
+            if (result.timing_metadata) {
+                const toggleBtn = explanationOutput.querySelector('.timing-toggle');
+                const timingContent = explanationOutput.querySelector('.timing-content');
+                if (toggleBtn && timingContent) {
+                    toggleBtn.addEventListener('click', () => {
+                        const isHidden = timingContent.style.display === 'none';
+                        timingContent.style.display = isHidden ? 'block' : 'none';
+                        toggleBtn.textContent = isHidden 
+                            ? `⏱️ Hide Timing Details (Total: ${result.timing_metadata.total_time}s)`
+                            : `⏱️ Show Timing Details (Total: ${result.timing_metadata.total_time}s)`;
+                    });
+                }
+            }
             
         } catch (error) {
             genStatus.textContent = "Network Error";
@@ -1146,6 +1168,57 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             explainBtn.disabled = true;
         }
+    }
+    
+    function buildTimingBreakdown(timingMetadata) {
+        if (!timingMetadata) return '';
+        
+        const validationTime = timingMetadata.validation_time || 0;
+        const hydeTime = timingMetadata.hyde_expansion_time || 0;
+        const sectionTimings = timingMetadata.section_timings || [];
+        const formattingTime = timingMetadata.formatting_time || 0;
+        const totalTime = timingMetadata.total_time || 0;
+        
+        let html = `
+            <div class="timing-breakdown">
+                <button class="timing-toggle" type="button">
+                    ⏱️ Show Timing Details (Total: ${totalTime}s)
+                </button>
+                <div class="timing-content" style="display: none;">
+                    <div class="timing-row">
+                        <span class="timing-label">Validation</span>
+                        <span class="timing-value">${validationTime}s</span>
+                    </div>
+                    <div class="timing-row">
+                        <span class="timing-label">HYDE Expansion</span>
+                        <span class="timing-value">${hydeTime}s</span>
+                    </div>`;
+        
+        if (sectionTimings.length > 0) {
+            html += `<div class="timing-section-header">LLM Calls (by Section):</div>`;
+            sectionTimings.forEach(section => {
+                html += `
+                    <div class="timing-row timing-section">
+                        <span class="timing-label">${section.label}</span>
+                        <span class="timing-value">${section.time}s</span>
+                    </div>`;
+            });
+        }
+        
+        html += `
+                    <div class="timing-row">
+                        <span class="timing-label">Formatting</span>
+                        <span class="timing-value">${formattingTime}s</span>
+                    </div>
+                    <div class="timing-row timing-total">
+                        <span class="timing-label">Total</span>
+                        <span class="timing-value">${totalTime}s</span>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        return html;
     }
     
     function renderMarkdown(text, stripHeading, keyword = '') {
