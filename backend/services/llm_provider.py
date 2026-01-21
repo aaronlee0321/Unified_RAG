@@ -1,9 +1,12 @@
 """
 Simple LLM provider wrapper for keyword extractor.
-Defaults to Google Gemini (free tier). Falls back to OpenAI-compatible APIs if Gemini isn't configured.
+Defaults to OpenAI. Falls back to Gemini if OpenAI isn't configured.
 """
 import os
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     from openai import OpenAI
@@ -32,49 +35,41 @@ class SimpleLLMProvider:
         """
         Initialize LLM provider.
         
+        Priority: OpenAI > Gemini
+        
         Args:
-            api_key: Optional API key (used for Gemini if provided; otherwise read from env)
-            base_url: OpenAI-compatible API base URL (only used if Gemini isn't configured)
-            model: Model name (Gemini model if using Gemini; otherwise OpenAI-compatible model)
+            api_key: Optional API key
+            base_url: OpenAI-compatible API base URL
+            model: Model name
         """
-        import logging
-        logger = logging.getLogger(__name__)
+        # Priority 1: OpenAI (if configured)
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if openai_key and OPENAI_AVAILABLE:
+            self._mode = "openai"
+            self.api_key = openai_key
+            self.base_url = base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+            self.model = model or os.getenv("DEFAULT_LLM_MODEL") or "gpt-4o-mini"
+            self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            logger.info(f"[LLM Provider] Using OpenAI model: {self.model}")
+            return
 
-        # Prefer Gemini always if configured
+        # Priority 2: Gemini (fallback)
         gemini_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        if gemini_key:
-            if not GEMINI_AVAILABLE:
-                raise RuntimeError(
-                    "Gemini is configured (GEMINI_API_KEY set) but Gemini provider is not available. "
-                    "Ensure `google-genai` is installed: pip install google-genai"
-                )
+        if gemini_key and GEMINI_AVAILABLE:
             self._mode = "gemini"
-            self._gemini = GeminiProvider(api_key=gemini_key, llm_model=model or os.getenv("DEFAULT_LLM_MODEL") or "gemini-1.5-flash")  # type: ignore
+            self._gemini = GeminiProvider(
+                api_key=gemini_key, 
+                llm_model=model or os.getenv("DEFAULT_LLM_MODEL") or "gemini-1.5-flash"
+            )
             self.model = getattr(self._gemini, "llm_model", model or "gemini-1.5-flash")
             logger.info(f"[LLM Provider] Using Gemini model: {self.model}")
             return
 
-        # Fallback: OpenAI-compatible provider (only if Gemini isn't configured)
-        self._mode = "openai_compatible"
-        if not OPENAI_AVAILABLE:
-            raise ImportError("openai package is required for OpenAI-compatible mode. Install with: pip install openai")
-
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
-        if not self.api_key:
-            raise ValueError(
-                "No Gemini key found and no OpenAI-compatible key found. "
-                "Set GEMINI_API_KEY (recommended) or OPENAI_API_KEY/QWEN_API_KEY/DASHSCOPE_API_KEY."
-            )
-
-        # Determine base URL (OpenAI-compatible)
-        if base_url:
-            self.base_url = base_url
-        else:
-            self.base_url = os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
-
-        self.model = model or os.getenv("LLM_MODEL") or "gpt-4o-mini"
-        logger.info(f"[LLM Provider] Using OpenAI-compatible endpoint: {self.base_url} model={self.model}")
-        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        # No provider configured - raise error
+        raise ValueError(
+            "No LLM provider configured. "
+            "Set OPENAI_API_KEY (recommended) or GEMINI_API_KEY."
+        )
     
     def llm(
         self,
@@ -113,8 +108,4 @@ class SimpleLLMProvider:
             return response.choices[0].message.content.strip()
         except Exception as e:
             raise RuntimeError(f"LLM API error: {str(e)}") from e
-
-
-
-
 

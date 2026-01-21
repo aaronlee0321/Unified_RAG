@@ -78,13 +78,6 @@ def _process_search_results(results: List[Dict], keyword: str, progress_messages
     """Process search results into the expected format."""
     doc_sections = {}
 
-    # Debug: Log first few results to check chunk_id
-    if results:
-        logger.info(f"[DEBUG] First 3 search results (checking chunk_id):")
-        for i, r in enumerate(results[:3]):
-            logger.info(
-                f"  [{i}] chunk_id: '{r.get('chunk_id', 'MISSING')}', section: {r.get('section_heading', 'N/A')}")
-
     for result in results:
         try:
             section = result.get('section_heading')
@@ -112,13 +105,6 @@ def _process_search_results(results: List[Dict], keyword: str, progress_messages
 
     choices = []
     store_data = []
-
-    # Debug: Log first few items to check chunk_id
-    if sorted_items:
-        logger.info(f"[DEBUG] First 3 store_data items (checking chunk_id):")
-        for i, item in enumerate(sorted_items[:3]):
-            logger.info(
-                f"  [{i}] chunk_id: '{item.get('chunk_id', 'MISSING')}', section: {item.get('section_heading', 'N/A')}")
 
     for item in sorted_items:
         try:
