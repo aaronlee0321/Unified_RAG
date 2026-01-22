@@ -8,22 +8,35 @@
     <div class="explainer-fixed-header">
         <div style="flex: 1; display: flex; align-items: center; gap: 12px;">
             <div class="keyword-input-wrapper" style="width: 400px; gap: 0;">
-                <input type="text" id="explainer-keyword" placeholder="Enter topic or keyword..." class="keyword-input" style="border-radius: var(--radius-md) 0 0 var(--radius-md); height: 40px;">
-                <button id="explainer-search-btn" class="search-icon-btn" style="border-radius: 0 var(--radius-md) var(--radius-md) 0; height: 40px; width: 48px;">
-                    <img src="{{ url_for('static', filename='icons/search.svg') }}" width="18" height="18" style="filter: brightness(0) invert(1);">
+                <input type="text" id="explainer-keyword" placeholder="Enter topic or keyword..." class="keyword-input"
+                    style="border-radius: var(--radius-md) 0 0 var(--radius-md); height: 40px;">
+                <button id="explainer-search-btn" class="search-icon-btn"
+                    style="border-radius: 0 var(--radius-md) var(--radius-md) 0; height: 40px; width: 48px;">
+                    <img src="{{ url_for('static', filename='icons/search.svg') }}" width="18" height="18"
+                        style="filter: brightness(0) invert(1);">
                 </button>
             </div>
             <div id="results-count" style="font-size: 0.75rem; color: var(--muted-foreground); margin-left: 8px;"></div>
-            
+
             <button type="button" role="tab" data-state="active" id="open-aliases-btn" class="btn-sparkle-fancy">
                 <div class="dots_border"></div>
                 <span class="sparkle-icon">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sparkles"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path><path d="M4 17v2"></path><path d="M5 18H3"></path></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="lucide lucide-sparkles">
+                        <path
+                            d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z">
+                        </path>
+                        <path d="M20 3v4"></path>
+                        <path d="M22 5h-4"></path>
+                        <path d="M4 17v2"></path>
+                        <path d="M5 18H3"></path>
+                    </svg>
                 </span>
                 <span class="text_button">Manage Aliases</span>
             </button>
         </div>
-        
+
         <div style="display: flex; align-items: center; gap: 12px;">
             <!-- Language Toggle Switch -->
             <label class="switch">
@@ -33,9 +46,10 @@
                     <span class="right">VN</span>
                 </span>
             </label>
-            
+
             <button id="explain-btn" class="btn-primary" style="height: 40px; padding: 0 20px;" disabled>
-                <img src="{{ url_for('static', filename='icons/refresh.svg') }}" width="18" height="18" style="filter: brightness(0) invert(1); margin-right: 8px;">
+                <img src="{{ url_for('static', filename='icons/refresh.svg') }}" width="18" height="18"
+                    style="filter: brightness(0) invert(1); margin-right: 8px;">
                 Generate Explanation ✨
             </button>
         </div>
@@ -47,69 +61,108 @@
             <div id="explainer-results-container" style="display: flex; flex-direction: column; height: 100%;">
                 <div class="collapsible-header" id="selection-header" style="height: 40px; flex-shrink: 0;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 0.7rem; font-weight: 800; text-transform: uppercase; color: var(--muted-foreground);">Search Results</span>
-                        <span style="font-size: 0.7rem; font-weight: 800; text-transform: uppercase; color: var(--muted-foreground);">(<span id="results-count-number">0</span>)</span>
-                        <div id="selected-count-badge" style="background: var(--primary); color: white; border-radius: 99px; padding: 1px 6px; font-size: 10px; font-weight: 700;">0</div>
+                        <span
+                            style="font-size: 0.7rem; font-weight: 800; text-transform: uppercase; color: var(--muted-foreground);">Search
+                            Results</span>
+                        <span
+                            style="font-size: 0.7rem; font-weight: 800; text-transform: uppercase; color: var(--muted-foreground);">(<span
+                                id="results-count-number">0</span>)</span>
+                        <div id="selected-count-badge"
+                            style="background: var(--primary); color: white; border-radius: 99px; padding: 1px 6px; font-size: 10px; font-weight: 700;">
+                            0</div>
                     </div>
-                    <img src="{{ url_for('static', filename='icons/chevron-down.svg') }}" width="14" height="14" class="chevron-toggle">
+                    <img src="{{ url_for('static', filename='icons/chevron-down.svg') }}" width="14" height="14"
+                        class="chevron-toggle">
                 </div>
-                
+
                 <div class="collapsible-content" id="selection-content">
-                    <div class="select-all-none" style="padding: 8px 16px; margin: 0; background: #fafafa; border-bottom: 1px solid var(--border); flex-shrink: 0;">
-                        <label class="select-option">
-                            <input type="checkbox" id="select-all-checkbox">
-                            <span style="font-size: 0.7rem; font-weight: 600;">All</span>
-                        </label>
-                        <label class="select-option">
-                            <input type="checkbox" id="select-none-checkbox">
-                            <span style="font-size: 0.7rem; font-weight: 600;">None</span>
-                        </label>
+                    <div class="select-all-none"
+                        style="padding: 8px 16px; margin: 0; background: #fafafa; border-bottom: 1px solid var(--border); flex-shrink: 0; display: flex; align-items: center; gap: 12px; flex-wrap: nowrap;">
+                        <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
+                            <label class="select-option"
+                                style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <input type="checkbox" id="select-all-checkbox">
+                                <span style="font-size: 0.7rem; font-weight: 600;">All</span>
+                            </label>
+                            <label class="select-option"
+                                style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <input type="checkbox" id="select-none-checkbox">
+                                <span style="font-size: 0.7rem; font-weight: 600;">None</span>
+                            </label>
+                        </div>
+
+                        <!-- Visual Separator -->
+                        <span style="font-size: 0.75rem; color: var(--muted-foreground); opacity: 0.5;">|</span>
+
+                        <!-- Query Variants (hidden by default, shown after search) -->
+                        <div id="query-filter-container"
+                            style="display: none; align-items: center; gap: 12px; flex-shrink: 0;">
+                            <label class="select-option"
+                                style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <input type="checkbox" id="query-checkbox-en">
+                                <span id="query-label-en" style="font-size: 0.7rem; font-weight: 600;">Query</span>
+                            </label>
+                            <label class="select-option"
+                                style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <input type="checkbox" id="query-checkbox-vn">
+                                <span id="query-label-vn" style="font-size: 0.7rem; font-weight: 600;">VN</span>
+                            </label>
+                        </div>
                     </div>
                     <div id="explainer-results-checkboxes" class="document-list scroll-area"></div>
                 </div>
             </div>
-            
-            <div id="explainer-empty-left" class="flex-1 flex flex-col items-center justify-center p-8 text-center opacity-30" style="display: none;">
+
+            <div id="explainer-empty-left"
+                class="flex-1 flex flex-col items-center justify-center p-8 text-center opacity-30"
+                style="display: none;">
             </div>
-            
+
             <!-- Resize Handle -->
             <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
         </div>
-        
+
         <!-- Right Output -->
         <div class="explainer-right">
             <!-- Section Preview Panel (hidden by default) -->
             <div id="section-preview-panel" class="section-preview-panel hidden">
                 <div class="preview-panel-header">
                     <div class="preview-panel-title">
-                        <img src="{{ url_for('static', filename='icons/file.svg') }}" width="18" height="18" style="opacity: 0.7;">
+                        <img src="{{ url_for('static', filename='icons/file.svg') }}" width="18" height="18"
+                            style="opacity: 0.7;">
                         <div class="preview-panel-title-text">
                             <span id="preview-doc-name" class="preview-doc-name">Document Name</span>
                             <span id="preview-section-title" class="preview-section-title">Section Title</span>
                         </div>
                     </div>
                     <button id="close-preview-btn" class="action-btn" title="Close preview">
-                        <img src="{{ url_for('static', filename='icons/close.svg') }}" width="16" height="16" style="opacity: 0.5;">
+                        <img src="{{ url_for('static', filename='icons/close.svg') }}" width="16" height="16"
+                            style="opacity: 0.5;">
                     </button>
                 </div>
                 <div id="preview-content" class="preview-panel-content scroll-area">
                     <!-- Section content will be inserted here -->
                 </div>
-                
+
                 <!-- Vertical Resize Handle -->
                 <div class="preview-resize-handle" id="preview-resize-handle"></div>
             </div>
 
             <div class="explainer-bubble explanation-bubble flex flex-col">
-                <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: rgba(59, 130, 246, 0.03);">
+                <div
+                    style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: rgba(59, 130, 246, 0.03);">
                     <h3 class="bubble-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
-                        <img src="{{ url_for('static', filename='icons/success.svg') }}" width="16" height="16" style="filter: invert(41%) sepia(85%) saturate(3015%) hue-rotate(222deg) brightness(101%) contrast(89%);">
+                        <img src="{{ url_for('static', filename='icons/success.svg') }}" width="16" height="16"
+                            style="filter: invert(41%) sepia(85%) saturate(3015%) hue-rotate(222deg) brightness(101%) contrast(89%);">
                         Generated Explanation ✨
                     </h3>
                     <div id="gen-status" style="font-size: 0.75rem; font-weight: 600;"></div>
                 </div>
-                <div id="explanation-output" class="explanation-content scroll-area flex-1" style="display: flex; align-items: center; justify-content: center;">
-                    <p class="placeholder-text" style="text-align: center; color: var(--muted-foreground); font-size: 0.875rem;">Search for a keyword and select documents to generate an explanation.</p>
+                <div id="explanation-output" class="explanation-content scroll-area flex-1"
+                    style="display: flex; align-items: center; justify-content: center;">
+                    <p class="placeholder-text"
+                        style="text-align: center; color: var(--muted-foreground); font-size: 0.875rem;">Search for a
+                        keyword and select documents to generate an explanation.</p>
                 </div>
             </div>
         </div>
@@ -117,13 +170,20 @@
 </div>
 
 <!-- Manage Aliases Drawer -->
-<div id="aliases-drawer" class="preview-panel" style="width: 450px; background: white; border-left: 1px solid var(--border); box-shadow: var(--shadow-lg); display: flex; flex-direction: column;">
-    <div style="padding: 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: flex-end; background: rgba(248, 248, 248, 0.4);">
+<div id="aliases-drawer" class="preview-panel"
+    style="width: 450px; background: white; border-left: 1px solid var(--border); box-shadow: var(--shadow-lg); display: flex; flex-direction: column;">
+    <div
+        style="padding: 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: flex-end; background: rgba(248, 248, 248, 0.4);">
         <div style="display: flex; align-items: center; gap: 12px;">
             <button id="alias-add-keyword-btn" class="add-keyword-button-wrapper">
                 <span class="button__text">Add Keyword</span>
                 <span class="button__icon">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="svg-icon">
+                        <path d="M5 12h14"></path>
+                        <path d="M12 5v14"></path>
+                    </svg>
                 </span>
             </button>
         </div>
@@ -131,36 +191,36 @@
 
     <div class="flex flex-col h-full overflow-hidden p-4 gap-4">
         <!-- Search & Filter Section -->
-        <div class="space-y-2 rounded-lg border border-border bg-muted/20 p-3" style="background: rgba(248, 248, 248, 0.4); border-radius: var(--radius-md); padding: 12px; border: 1px solid var(--border);">
+        <div class="space-y-2 rounded-lg border border-border bg-muted/20 p-3"
+            style="background: rgba(248, 248, 248, 0.4); border-radius: var(--radius-md); padding: 12px; border: 1px solid var(--border);">
             <div style="position: relative; margin-bottom: 12px;">
-                <input 
-                    type="text"
-                    id="alias-search-input"
-                    class="document-search"
-                    placeholder="Search keywords or aliases..."
-                    style="width: 100%;"
-                />
+                <input type="text" id="alias-search-input" class="document-search"
+                    placeholder="Search keywords or aliases..." style="width: 100%;" />
             </div>
             <div style="display: flex; align-items: center; justify-content: space-between;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 0.7rem; color: var(--muted-foreground); text-transform: uppercase; font-weight: 700;">Filter:</span>
+                    <span
+                        style="font-size: 0.7rem; color: var(--muted-foreground); text-transform: uppercase; font-weight: 700;">Filter:</span>
                     <div style="display: flex; gap: 6px;">
                         <button class="filter-tag active" data-lang="all" style="cursor: pointer;">All</button>
                         <button class="filter-tag" data-lang="EN" style="cursor: pointer;">English</button>
                         <button class="filter-tag" data-lang="VN" style="cursor: pointer;">Vietnamese</button>
                     </div>
                 </div>
-                <div id="alias-results-stats" style="font-size: 0.7rem; color: var(--muted-foreground); font-weight: 500;">
+                <div id="alias-results-stats"
+                    style="font-size: 0.7rem; color: var(--muted-foreground); font-weight: 500;">
                     Results: 0 of 0 keywords
                 </div>
             </div>
         </div>
 
         <!-- Keywords List -->
-        <div id="alias-keywords-list" class="scroll-area flex-1 rounded-lg border border-border" style="border: 1px solid var(--border); border-radius: var(--radius-md); background: white; min-height: 0;">
+        <div id="alias-keywords-list" class="scroll-area flex-1 rounded-lg border border-border"
+            style="border: 1px solid var(--border); border-radius: var(--radius-md); background: white; min-height: 0;">
             <!-- Keywords rendered here -->
             <div class="flex flex-col items-center justify-center py-12 text-center opacity-40">
-                <img src="{{ url_for('static', filename='icons/library.svg') }}" width="48" height="48" style="margin-bottom: 12px;">
+                <img src="{{ url_for('static', filename='icons/library.svg') }}" width="48" height="48"
+                    style="margin-bottom: 12px;">
                 <p style="font-size: 0.875rem;">Loading aliases...</p>
             </div>
         </div>
@@ -173,16 +233,21 @@
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
             <h3 style="font-size: 1rem; font-weight: 600; margin: 0;">Add New Keyword</h3>
             <button class="close-dialog-btn action-btn">
-                <img src="{{ url_for('static', filename='icons/close.svg') }}" width="18" height="18" style="opacity: 0.5;">
+                <img src="{{ url_for('static', filename='icons/close.svg') }}" width="18" height="18"
+                    style="opacity: 0.5;">
             </button>
         </div>
         <div style="display: flex; flex-direction: column; gap: 16px;">
             <div style="display: flex; flex-direction: column; gap: 6px;">
-                <label style="font-size: 0.75rem; font-weight: 700; color: var(--muted-foreground); text-transform: uppercase;">Keyword Name</label>
-                <input type="text" id="new-alias-keyword-name" placeholder="e.g. tank stats" style="width: 100%; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md);">
+                <label
+                    style="font-size: 0.75rem; font-weight: 700; color: var(--muted-foreground); text-transform: uppercase;">Keyword
+                    Name</label>
+                <input type="text" id="new-alias-keyword-name" placeholder="e.g. tank stats"
+                    style="width: 100%; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md);">
             </div>
             <div style="display: flex; flex-direction: column; gap: 6px;">
-                <label style="font-size: 0.75rem; font-weight: 700; color: var(--muted-foreground); text-transform: uppercase;">Language</label>
+                <label
+                    style="font-size: 0.75rem; font-weight: 700; color: var(--muted-foreground); text-transform: uppercase;">Language</label>
                 <div class="radio-inputs" style="width: 100%;">
                     <label class="radio">
                         <input type="radio" name="new-alias-keyword-lang" value="EN" checked>
@@ -194,7 +259,8 @@
                     </label>
                 </div>
             </div>
-            <button id="confirm-add-alias-keyword" class="btn-primary" style="width: 100%; margin-top: 8px; height: 40px;">Create Keyword</button>
+            <button id="confirm-add-alias-keyword" class="btn-primary"
+                style="width: 100%; margin-top: 8px; height: 40px;">Create Keyword</button>
         </div>
     </div>
 </div>

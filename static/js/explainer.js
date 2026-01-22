@@ -14,6 +14,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const resultsCount = document.getElementById('results-count');
     const selectAllCheckbox = document.getElementById('select-all-checkbox');
     const selectNoneCheckbox = document.getElementById('select-none-checkbox');
+    const queryCheckboxEn = document.getElementById('query-checkbox-en');
+    const queryCheckboxVn = document.getElementById('query-checkbox-vn');
+    const queryLabelEn = document.getElementById('query-label-en');
+    const queryLabelVn = document.getElementById('query-label-vn');
+    const queryFilterContainer = document.getElementById('query-filter-container');
     const explainBtn = document.getElementById('explain-btn');
     const explanationOutput = document.getElementById('explanation-output');
     const languageToggle = document.getElementById('language-toggle');
@@ -23,6 +28,7 @@ document.addEventListener('DOMContentLoaded', function () {
     let lastSearchKeyword = null; // Replaces last_search_keyword
     let deepSearchContext = null; // Track deep search: { originalKeyword, selectedKeyword }
     let selectedLanguage = 'en'; // Language preference: 'en' or 'vn'
+    let translationInfo = null; // Store translation info from search: { original, translation }
 
     // Hierarchical view state
     let expandedDocs = new Set(); // Track which documents are expanded
@@ -49,6 +55,14 @@ document.addEventListener('DOMContentLoaded', function () {
     selectAllCheckbox.addEventListener('change', handleSelectAll);
     selectNoneCheckbox.addEventListener('change', handleSelectNone);
     explainBtn.addEventListener('click', generateExplanation);
+
+    // Query filter event listeners
+    if (queryCheckboxEn) {
+        queryCheckboxEn.addEventListener('change', applyQueryFilter);
+    }
+    if (queryCheckboxVn) {
+        queryCheckboxVn.addEventListener('change', applyQueryFilter);
+    }
 
     // Collapsible Logic
     const selectionHeader = document.getElementById('selection-header');
@@ -186,6 +200,11 @@ document.addEventListener('DOMContentLoaded', function () {
         const selectedCountBadge = document.getElementById('selected-count-badge');
 
         if (!keyword) {
+            // Hide query filter container when keyword is empty
+            if (queryFilterContainer) {
+                queryFilterContainer.style.display = 'none';
+            }
+
             // Always show results container, even when empty
             explainerResultsContainer.style.display = 'flex';
             if (emptyLeft) emptyLeft.style.display = 'none';
@@ -202,6 +221,23 @@ document.addEventListener('DOMContentLoaded', function () {
             explainerSearchBtn.disabled = true;
             resultsCount.style.display = 'block';
             resultsCount.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;"></div> <span>Searching...</span></div>';
+
+            // Reset translation info for new search
+            translationInfo = null;
+
+            // Hide query filter container at start of new search
+            if (queryFilterContainer) {
+                queryFilterContainer.style.display = 'none';
+            }
+
+            // Reset query labels to defaults
+            if (queryLabelEn) queryLabelEn.textContent = 'Query';
+            if (queryLabelVn) queryLabelVn.textContent = 'VN';
+            if (queryCheckboxVn) {
+                queryCheckboxVn.disabled = false;
+                queryCheckboxVn.checked = true;
+            }
+            if (queryCheckboxEn) queryCheckboxEn.checked = true;
 
             // Check for aliases first
             let searchKeywords = [keyword];
@@ -228,6 +264,29 @@ document.addEventListener('DOMContentLoaded', function () {
                 });
                 const result = await response.json();
 
+                // Capture translation_info from the original keyword search (first in loop)
+                if (result.translation_info && !translationInfo && kw === keyword) {
+                    translationInfo = result.translation_info;
+
+                    // Update labels immediately after capturing translation info
+                    if (translationInfo.original) {
+                        queryLabelEn.textContent = translationInfo.original;
+                    }
+                    if (translationInfo.translation) {
+                        queryLabelVn.textContent = translationInfo.translation;
+                        queryCheckboxVn.disabled = false;
+                    } else {
+                        queryLabelVn.textContent = 'VN';
+                        queryCheckboxVn.disabled = true;
+                        queryCheckboxVn.checked = false;
+                    }
+
+                    // Show query filter container after translation info is captured
+                    if (queryFilterContainer && translationInfo.original) {
+                        queryFilterContainer.style.display = 'flex';
+                    }
+                }
+
                 if (result.success && result.choices) {
                     result.choices.forEach((choice, idx) => {
                         const storeItem = result.store_data[idx];
@@ -236,12 +295,28 @@ document.addEventListener('DOMContentLoaded', function () {
                             mergedKeys.add(key);
                             allChoices.push(choice);
                             allStoreData.push(storeItem);
+                        } else {
+                            // Merge matching keywords for existing results
+                            const existingItem = allStoreData.find(item => `${item.doc_id}:${item.section_heading}` === key);
+                            if (existingItem && storeItem._matching_keywords) {
+                                if (!existingItem._matching_keywords) existingItem._matching_keywords = [];
+                                storeItem._matching_keywords.forEach(mk => {
+                                    if (!existingItem._matching_keywords.includes(mk)) {
+                                        existingItem._matching_keywords.push(mk);
+                                    }
+                                });
+                            }
                         }
                     });
                 }
             }
 
             if (allChoices.length === 0) {
+                // Hide query filter container when no results
+                if (queryFilterContainer) {
+                    queryFilterContainer.style.display = 'none';
+                }
+
                 // Show "No results" with "Search Deeper?" option
                 resultsCount.innerHTML = `
                     <div style="display: flex; align-items: center; gap: 12px;">
@@ -278,6 +353,9 @@ document.addEventListener('DOMContentLoaded', function () {
             if (resultsCountNumber) resultsCountNumber.textContent = count.toString();
 
             renderCheckboxes(allChoices);
+
+            // Apply query filter after rendering
+            applyQueryFilter();
 
             if (count > 0) {
                 resultsCount.textContent = `Found ${count} result(s)`;
@@ -570,9 +648,171 @@ document.addEventListener('DOMContentLoaded', function () {
         closeBtn.addEventListener('click', removePrompt);
     }
 
+    function groupChoicesByDocument(choices) {
+        const grouped = {};
+        choices.forEach((choice, index) => {
+            const storeItem = storedResults[index];
+            const parts = choice.split(' → ');
+            const docName = parts[0] || 'Unknown Document';
+            const sectionTitle = parts.length > 1 ? parts.slice(1).join(' → ') : choice;
+
+            if (!grouped[docName]) {
+                grouped[docName] = [];
+            }
+            grouped[docName].push({
+                choice: choice,
+                storeItem: storeItem,
+                index: index,
+                sectionTitle: sectionTitle
+            });
+        });
+        return grouped;
+    }
+
+    function sortSectionsByChunkId(sections) {
+        return sections.sort((sectionA, sectionB) => {
+            const chunkIdA = sectionA.storeItem?.chunk_id || '';
+            const chunkIdB = sectionB.storeItem?.chunk_id || '';
+            return chunkIdA.localeCompare(chunkIdB, undefined, { numeric: true, sensitivity: 'base' });
+        });
+    }
+
+    function createDocumentHeader(docName, docId, sections) {
+        const docHeader = document.createElement('div');
+        docHeader.className = 'doc-row-header';
+
+        const chevron = document.createElement('img');
+        chevron.src = '/static/icons/chevron-right.svg';
+        chevron.className = `doc-row-chevron ${expandedDocs.has(docId) ? 'expanded' : ''}`;
+        chevron.onclick = (e) => {
+            e.stopPropagation();
+            toggleDocExpanded(docId);
+        };
+
+        const docCheckbox = document.createElement('input');
+        docCheckbox.type = 'checkbox';
+        docCheckbox.className = 'doc-row-checkbox';
+        docCheckbox.id = `doc-checkbox-${docId}`;
+        docCheckbox.onclick = (e) => {
+            e.stopPropagation();
+            toggleDocumentSelection(docId, docCheckbox.checked);
+        };
+
+        const fileIcon = document.createElement('img');
+        fileIcon.src = '/static/icons/file.svg';
+        fileIcon.className = 'doc-row-icon';
+
+        const docNameSpan = document.createElement('span');
+        docNameSpan.className = 'doc-row-name';
+        docNameSpan.textContent = formatDocName(docName);
+        docNameSpan.title = docName;
+
+        const countSpan = document.createElement('span');
+        countSpan.className = 'doc-row-count';
+        countSpan.id = `doc-count-${docId}`;
+        countSpan.textContent = `(0/${sections.length})`;
+
+        docHeader.appendChild(chevron);
+        docHeader.appendChild(docCheckbox);
+        docHeader.appendChild(fileIcon);
+        docHeader.appendChild(docNameSpan);
+        docHeader.appendChild(countSpan);
+        docHeader.onclick = () => toggleDocExpanded(docId);
+
+        return docHeader;
+    }
+
+    function createSectionRow(item, docName, docId) {
+        const sectionId = `section-${item.index}`;
+        const sectionRow = document.createElement('div');
+        sectionRow.className = 'section-row';
+        sectionRow.dataset.sectionId = sectionId;
+        sectionRow.dataset.docId = docId;
+        sectionRow.dataset.index = item.index;
+
+        if (activePreviewId === sectionId) {
+            sectionRow.classList.add('preview-active');
+        }
+
+        const sectionCheckbox = document.createElement('input');
+        sectionCheckbox.type = 'checkbox';
+        sectionCheckbox.className = 'section-row-checkbox';
+        sectionCheckbox.id = `checkbox-${item.index}`;
+        sectionCheckbox.value = item.choice;
+        sectionCheckbox.name = 'explainer-choice';
+        sectionCheckbox.onclick = (e) => {
+            e.stopPropagation();
+            updateSectionSelection(sectionRow, sectionCheckbox.checked);
+            updateDocCheckboxState(docId);
+            updateGenerateButtonState();
+            updateSelectAllNoneState();
+        };
+
+        const sectionTitle = document.createElement('span');
+        sectionTitle.className = 'section-row-title';
+        sectionTitle.textContent = item.sectionTitle;
+        sectionTitle.title = item.choice;
+
+        const previewBtn = document.createElement('button');
+        previewBtn.className = `preview-btn ${activePreviewId === sectionId ? 'active' : ''}`;
+        previewBtn.innerHTML = `
+            <img src="/static/icons/eye.svg" width="12" height="12">
+            <span>Preview</span>
+        `;
+        previewBtn.onclick = (e) => {
+            e.stopPropagation();
+            const previewDocName = item.storeItem?.doc_name || docName;
+            const docId = item.storeItem?.doc_id || '';
+            const sectionHeading = item.storeItem?.section_heading || item.sectionTitle;
+            const previewContent = item.storeItem?.content || '';
+            togglePreview(sectionId, previewDocName, item.sectionTitle, previewContent, docId, sectionHeading);
+        };
+
+        sectionRow.appendChild(sectionCheckbox);
+        sectionRow.appendChild(sectionTitle);
+        sectionRow.appendChild(previewBtn);
+
+        sectionRow.onclick = () => {
+            sectionCheckbox.checked = !sectionCheckbox.checked;
+            updateSectionSelection(sectionRow, sectionCheckbox.checked);
+            updateDocCheckboxState(docId);
+            updateGenerateButtonState();
+            updateSelectAllNoneState();
+        };
+
+        return sectionRow;
+    }
+
     function renderCheckboxes(choices) {
         explainerResultsCheckboxes.innerHTML = '';
         groupedResults = {};
+
+        // Update query variant labels with actual keywords
+        if (translationInfo) {
+            // Always use original keyword for EN label
+            if (translationInfo.original) {
+                queryLabelEn.textContent = translationInfo.original;
+            } else if (lastSearchKeyword) {
+                queryLabelEn.textContent = lastSearchKeyword;
+            }
+
+            // Use translation for VN label if available
+            if (translationInfo.translation) {
+                queryLabelVn.textContent = translationInfo.translation;
+                queryCheckboxVn.disabled = false;
+            } else {
+                // No translation available - disable VN checkbox
+                queryLabelVn.textContent = 'VN';
+                queryCheckboxVn.disabled = true;
+                queryCheckboxVn.checked = false;
+            }
+        } else if (lastSearchKeyword) {
+            // Fallback: use lastSearchKeyword if translationInfo not available
+            queryLabelEn.textContent = lastSearchKeyword;
+            queryLabelVn.textContent = 'VN';
+            queryCheckboxVn.disabled = true;
+            queryCheckboxVn.checked = false;
+        }
 
         if (!choices || choices.length === 0) {
             expandedDocs.clear();
@@ -581,165 +821,26 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        // Group choices by document name
-        // Choice format from API: "DocName → SectionHeading"
-        choices.forEach((choice, index) => {
-            const storeItem = storedResults[index];
-
-            // Parse choice string: "DocName → SectionHeading"
-            const parts = choice.split(' → ');
-            const docName = parts[0] || 'Unknown Document';
-            const sectionTitle = parts.length > 1 ? parts.slice(1).join(' → ') : choice;
-
-            if (!groupedResults[docName]) {
-                groupedResults[docName] = [];
-            }
-            groupedResults[docName].push({
-                choice: choice,
-                storeItem: storeItem,
-                index: index,
-                sectionTitle: sectionTitle
-            });
-        });
+        groupedResults = groupChoicesByDocument(choices);
 
         // Render hierarchical structure
         Object.keys(groupedResults).forEach(docName => {
-            const sections = groupedResults[docName];
-
-            // Sort sections by chunk_id with natural/numeric sorting
-            sections.sort((sectionA, sectionB) => {
-                const chunkIdA = sectionA.storeItem?.chunk_id || '';
-                const chunkIdB = sectionB.storeItem?.chunk_id || '';
-                return chunkIdA.localeCompare(chunkIdB, undefined, { numeric: true, sensitivity: 'base' });
-            });
-
+            const sections = sortSectionsByChunkId(groupedResults[docName]);
             const docId = `doc-${hashString(docName)}`;
 
-            // Document row
             const docRow = document.createElement('div');
             docRow.className = 'doc-row';
             docRow.dataset.docId = docId;
 
-            // Document header
-            const docHeader = document.createElement('div');
-            docHeader.className = 'doc-row-header';
-
-            // Chevron
-            const chevron = document.createElement('img');
-            chevron.src = '/static/icons/chevron-right.svg';
-            chevron.className = `doc-row-chevron ${expandedDocs.has(docId) ? 'expanded' : ''}`;
-            chevron.onclick = (e) => {
-                e.stopPropagation();
-                toggleDocExpanded(docId);
-            };
-
-            // Document checkbox
-            const docCheckbox = document.createElement('input');
-            docCheckbox.type = 'checkbox';
-            docCheckbox.className = 'doc-row-checkbox';
-            docCheckbox.id = `doc-checkbox-${docId}`;
-            docCheckbox.onclick = (e) => {
-                e.stopPropagation();
-                toggleDocumentSelection(docId, docCheckbox.checked);
-            };
-
-            // File icon
-            const fileIcon = document.createElement('img');
-            fileIcon.src = '/static/icons/file.svg';
-            fileIcon.className = 'doc-row-icon';
-
-            // Document name
-            const docNameSpan = document.createElement('span');
-            docNameSpan.className = 'doc-row-name';
-            docNameSpan.textContent = formatDocName(docName);
-            docNameSpan.title = docName;
-
-            // Selection count
-            const countSpan = document.createElement('span');
-            countSpan.className = 'doc-row-count';
-            countSpan.id = `doc-count-${docId}`;
-            countSpan.textContent = `(0/${sections.length})`;
-
-            docHeader.appendChild(chevron);
-            docHeader.appendChild(docCheckbox);
-            docHeader.appendChild(fileIcon);
-            docHeader.appendChild(docNameSpan);
-            docHeader.appendChild(countSpan);
-
-            // Click on header row to toggle expand
-            docHeader.onclick = () => toggleDocExpanded(docId);
-
+            const docHeader = createDocumentHeader(docName, docId, sections);
             docRow.appendChild(docHeader);
 
-            // Sections container
             const sectionsContainer = document.createElement('div');
             sectionsContainer.className = `doc-sections ${expandedDocs.has(docId) ? 'expanded' : ''}`;
             sectionsContainer.id = `sections-${docId}`;
 
-            sections.forEach((item, sectionIdx) => {
-                const sectionId = `section-${item.index}`;
-
-                const sectionRow = document.createElement('div');
-                sectionRow.className = 'section-row';
-                sectionRow.dataset.sectionId = sectionId;
-                sectionRow.dataset.docId = docId;
-                sectionRow.dataset.index = item.index;
-
-                if (activePreviewId === sectionId) {
-                    sectionRow.classList.add('preview-active');
-                }
-
-                // Section checkbox
-                const sectionCheckbox = document.createElement('input');
-                sectionCheckbox.type = 'checkbox';
-                sectionCheckbox.className = 'section-row-checkbox';
-                sectionCheckbox.id = `checkbox-${item.index}`;
-                sectionCheckbox.value = item.choice;
-                sectionCheckbox.name = 'explainer-choice';
-                sectionCheckbox.onclick = (e) => {
-                    e.stopPropagation();
-                    updateSectionSelection(sectionRow, sectionCheckbox.checked);
-                    updateDocCheckboxState(docId);
-                    updateGenerateButtonState();
-                    updateSelectAllNoneState();
-                };
-
-                // Section title
-                const sectionTitle = document.createElement('span');
-                sectionTitle.className = 'section-row-title';
-                sectionTitle.textContent = item.sectionTitle;
-                sectionTitle.title = item.choice;
-
-                // Preview button
-                const previewBtn = document.createElement('button');
-                previewBtn.className = `preview-btn ${activePreviewId === sectionId ? 'active' : ''}`;
-                previewBtn.innerHTML = `
-                    <img src="/static/icons/eye.svg" width="12" height="12">
-                    <span>Preview</span>
-                `;
-                previewBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    // Get doc_id and section_heading from store item
-                    const previewDocName = item.storeItem?.doc_name || docName;
-                    const docId = item.storeItem?.doc_id || '';
-                    const sectionHeading = item.storeItem?.section_heading || item.sectionTitle;
-                    const previewContent = item.storeItem?.content || ''; // Fallback, but won't be used
-                    togglePreview(sectionId, previewDocName, item.sectionTitle, previewContent, docId, sectionHeading);
-                };
-
-                sectionRow.appendChild(sectionCheckbox);
-                sectionRow.appendChild(sectionTitle);
-                sectionRow.appendChild(previewBtn);
-
-                // Click on row to toggle checkbox
-                sectionRow.onclick = () => {
-                    sectionCheckbox.checked = !sectionCheckbox.checked;
-                    updateSectionSelection(sectionRow, sectionCheckbox.checked);
-                    updateDocCheckboxState(docId);
-                    updateGenerateButtonState();
-                    updateSelectAllNoneState();
-                };
-
+            sections.forEach(item => {
+                const sectionRow = createSectionRow(item, docName, docId);
                 sectionsContainer.appendChild(sectionRow);
             });
 
@@ -750,6 +851,9 @@ document.addEventListener('DOMContentLoaded', function () {
         // Reset select all/none checkboxes
         selectAllCheckbox.checked = false;
         selectNoneCheckbox.checked = false;
+
+        // Apply query filter after rendering
+        applyQueryFilter();
     }
 
     // Helper functions for hierarchical view
@@ -820,11 +924,25 @@ document.addEventListener('DOMContentLoaded', function () {
         const countSpan = document.getElementById(`doc-count-${docId}`);
         const sectionsContainer = document.getElementById(`sections-${docId}`);
 
-        if (!sectionsContainer || !docCheckbox) return;
+        if (!sectionsContainer || !docCheckbox) {
+            return;
+        }
 
         const checkboxes = sectionsContainer.querySelectorAll('.section-row-checkbox');
         const checkedCount = sectionsContainer.querySelectorAll('.section-row-checkbox:checked').length;
-        const totalCount = checkboxes.length;
+
+        // Count only visible sections (not hidden by filter)
+        const sectionRows = sectionsContainer.querySelectorAll('.section-row');
+        let visibleCount = 0;
+        sectionRows.forEach(row => {
+            const inlineStyle = row.style.display;
+            const computedStyle = window.getComputedStyle(row);
+            // Row is visible if inline style is not 'none' AND computed style is not 'none'
+            if (inlineStyle !== 'none' && computedStyle.display !== 'none') {
+                visibleCount++;
+            }
+        });
+        const totalCount = visibleCount > 0 ? visibleCount : checkboxes.length; // Fallback to all if no visible
 
         // Update count display
         if (countSpan) {
@@ -1005,6 +1123,24 @@ document.addEventListener('DOMContentLoaded', function () {
             });
 
             updateGenerateButtonState();
+        } else {
+            // When "All" is unchecked, uncheck all sections
+            const sectionRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
+            sectionRows.forEach(row => {
+                const checkbox = row.querySelector('.section-row-checkbox');
+                if (checkbox) {
+                    checkbox.checked = false;
+                    updateSectionSelection(row, false);
+                }
+            });
+
+            // Update all document checkboxes
+            Object.keys(groupedResults).forEach(docName => {
+                const docId = `doc-${hashString(docName)}`;
+                updateDocCheckboxState(docId);
+            });
+
+            updateGenerateButtonState();
         }
     }
 
@@ -1089,20 +1225,19 @@ document.addEventListener('DOMContentLoaded', function () {
             genStatus.textContent = result.success ? "✓ Completed" : "✕ Generation Failed";
             genStatus.style.color = result.success ? "var(--status-success)" : "var(--status-error)";
 
-            if (!result.success) {
-                // Keep block display for error message
+            function setExplanationDisplay() {
                 explanationOutput.style.display = 'block';
                 explanationOutput.style.alignItems = 'stretch';
                 explanationOutput.style.justifyContent = 'flex-start';
+            }
+
+            if (!result.success) {
+                setExplanationDisplay();
                 explanationOutput.innerHTML = `<div class="placeholder-text"><p style="color:var(--status-error)">${result.explanation || 'Generation failed'}</p></div>`;
                 return;
             }
 
-            // Explanation formatting
-            // Remove flex centering styles when content is present
-            explanationOutput.style.display = 'block';
-            explanationOutput.style.alignItems = 'stretch';
-            explanationOutput.style.justifyContent = 'flex-start';
+            setExplanationDisplay();
 
             // Build timing breakdown if available
             let timingHTML = '';
@@ -1116,13 +1251,21 @@ document.addEventListener('DOMContentLoaded', function () {
             if (result.timing_metadata) {
                 const toggleBtn = explanationOutput.querySelector('.timing-toggle');
                 const timingContent = explanationOutput.querySelector('.timing-content');
-                if (toggleBtn && timingContent) {
+                const toggleSpan = toggleBtn?.querySelector('span');
+                const toggleIcon = toggleBtn?.querySelector('.icon');
+
+                if (toggleBtn && timingContent && toggleSpan) {
+                    const totalTime = result.timing_metadata.total_time || 0;
                     toggleBtn.addEventListener('click', () => {
                         const isHidden = timingContent.style.display === 'none';
                         timingContent.style.display = isHidden ? 'block' : 'none';
-                        toggleBtn.textContent = isHidden
-                            ? `⏱️ Hide Timing Details (Total: ${result.timing_metadata.total_time}s)`
-                            : `⏱️ Show Timing Details (Total: ${result.timing_metadata.total_time}s)`;
+                        toggleSpan.textContent = isHidden
+                            ? `⏱️ Hide Timing Details (Total: ${totalTime.toFixed(2)}s)`
+                            : `⏱️ Show Timing Details (Total: ${totalTime.toFixed(2)}s)`;
+                        if (toggleIcon) {
+                            toggleIcon.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+                        }
+                        toggleBtn.classList.toggle('expanded', isHidden);
                     });
                 }
             }
@@ -1130,7 +1273,10 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (error) {
             genStatus.textContent = "Network Error";
             genStatus.style.color = "var(--status-error)";
-            explanationOutput.innerHTML = `<p>Error: ${error.message}</p>`;
+            explanationOutput.style.display = 'block';
+            explanationOutput.style.alignItems = 'stretch';
+            explanationOutput.style.justifyContent = 'flex-start';
+            explanationOutput.innerHTML = `<div class="placeholder-text"><p style="color:var(--status-error)">Error: ${error.message || 'Unknown error occurred'}</p></div>`;
         } finally {
             explainBtn.disabled = false;
             updateGenerateButtonState();
@@ -1182,7 +1328,8 @@ document.addEventListener('DOMContentLoaded', function () {
         let html = `
             <div class="timing-breakdown">
                 <button class="timing-toggle" type="button">
-                    ⏱️ Show Timing Details (Total: ${totalTime}s)
+                    <span>⏱️ Show Timing Details (Total: ${totalTime.toFixed(2)}s)</span>
+                    <svg class="icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                 </button>
                 <div class="timing-content" style="display: none;">
                     <div class="timing-row">
@@ -1701,6 +1848,118 @@ document.addEventListener('DOMContentLoaded', function () {
                 previewPanel.style.height = `${height}px`;
             }
         }
+    }
+
+    function applyQueryFilter() {
+        if (!translationInfo) {
+            // No translation info, show all results
+            const allRows = explainerResultsCheckboxes.querySelectorAll('.doc-row, .section-row');
+            allRows.forEach(row => {
+                row.style.display = '';
+            });
+            return;
+        }
+
+        const enChecked = queryCheckboxEn ? queryCheckboxEn.checked : true;
+        const vnChecked = queryCheckboxVn ? queryCheckboxVn.checked : false;
+        const vnEnabled = queryCheckboxVn ? !queryCheckboxVn.disabled : false;
+
+        // If neither is checked, hide all results
+        if (!enChecked && (!vnChecked || !vnEnabled)) {
+            const allRows = explainerResultsCheckboxes.querySelectorAll('.doc-row, .section-row');
+            allRows.forEach(row => {
+                row.style.display = 'none';
+            });
+            // Update counts to show 0
+            const allDocRows = explainerResultsCheckboxes.querySelectorAll('.doc-row');
+            allDocRows.forEach(docRow => {
+                const docId = docRow.dataset.docId;
+                if (docId) {
+                    updateDocCheckboxState(docId);
+                }
+            });
+            return;
+        }
+
+        const originalKeyword = translationInfo.original?.toLowerCase() || '';
+        const translatedKeyword = translationInfo.translation?.toLowerCase() || '';
+
+        // Filter results based on matching keywords
+        const allRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
+
+        allRows.forEach(row => {
+            const index = parseInt(row.dataset.index);
+            if (isNaN(index)) {
+                row.style.display = 'none';
+                return;
+            }
+
+            const storeItem = storedResults[index];
+            if (!storeItem) {
+                row.style.display = 'none';
+                return;
+            }
+
+            // Get matching keywords for this chunk
+            const matchingKeywords = storeItem._matching_keywords || [];
+            let shouldShow = false;
+
+            if (matchingKeywords.length > 0) {
+                // Check if chunk contains original keyword
+                const hasOriginal = matchingKeywords.some(kw =>
+                    kw.toLowerCase() === originalKeyword
+                );
+
+                // Check if chunk contains translated keyword
+                const hasTranslation = matchingKeywords.some(kw =>
+                    kw.toLowerCase() === translatedKeyword
+                );
+
+                // Show if:
+                // - EN checked and chunk has original keyword, OR
+                // - VN checked and chunk has translated keyword
+                if (enChecked && hasOriginal) {
+                    shouldShow = true;
+                } else if (vnChecked && vnEnabled && hasTranslation) {
+                    shouldShow = true;
+                }
+
+                // Special case: if chunk contains both keywords, show if either checkbox is checked
+                if (hasOriginal && hasTranslation) {
+                    shouldShow = enChecked || (vnChecked && vnEnabled);
+                }
+            } else {
+                // No matching keywords info - hide by default (user must check a filter to see results)
+                shouldShow = false;
+            }
+
+            row.style.display = shouldShow ? '' : 'none';
+        });
+
+        // Update document row visibility based on child sections
+        const docRows = explainerResultsCheckboxes.querySelectorAll('.doc-row');
+        docRows.forEach(docRow => {
+            const docId = docRow.dataset.docId;
+            const childSections = explainerResultsCheckboxes.querySelectorAll(
+                `.section-row[data-doc-id="${docId}"]`
+            );
+            let hasVisibleChild = false;
+            childSections.forEach(sectionRow => {
+                if (sectionRow.style.display !== 'none') {
+                    hasVisibleChild = true;
+                }
+            });
+            docRow.style.display = hasVisibleChild ? '' : 'none';
+        });
+
+        // Update document counts after filtering
+        const allDocRows = explainerResultsCheckboxes.querySelectorAll('.doc-row');
+        allDocRows.forEach(docRow => {
+            const docId = docRow.dataset.docId;
+            if (docId) {
+                updateDocCheckboxState(docId);
+            }
+        });
     }
 });
 

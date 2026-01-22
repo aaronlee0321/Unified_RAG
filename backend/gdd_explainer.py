@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def _create_search_response(keyword: str, choices: List[str] = None, store_data: List[Dict] = None,
                             status_msg: str = "", success: bool = True,
-                            progress_messages: List[str] = None) -> Dict[str, Any]:
+                            progress_messages: List[str] = None, translation_info: Dict[str, str] = None) -> Dict[str, Any]:
     """Create standardized search response structure."""
     return {
         'choices': choices or [],
@@ -23,7 +23,8 @@ def _create_search_response(keyword: str, choices: List[str] = None, store_data:
         'status_msg': status_msg,
         'success': success,
         'keyword': keyword,
-        'progress_messages': progress_messages or []
+        'progress_messages': progress_messages or [],
+        'translation_info': translation_info
     }
 
 
@@ -74,7 +75,7 @@ def _create_section_entry(result: Dict) -> Dict:
     }
 
 
-def _process_search_results(results: List[Dict], keyword: str, progress_messages: List[str] = None) -> Dict[str, Any]:
+def _process_search_results(results: List[Dict], keyword: str, progress_messages: List[str] = None, translation_info: Dict[str, str] = None) -> Dict[str, Any]:
     """Process search results into the expected format."""
     doc_sections = {}
 
@@ -168,7 +169,8 @@ def _process_search_results(results: List[Dict], keyword: str, progress_messages
         'status_msg': f"✅ Found {len(sorted_items)} document/section combinations. Select which ones to explain.",
         'success': True,
         'keyword': keyword,
-        'progress_messages': progress_messages or []
+        'progress_messages': progress_messages or [],
+        'translation_info': translation_info
     }
 
 
@@ -199,9 +201,22 @@ def search_for_explainer(keyword: str) -> Dict[str, Any]:
         logger.info("=" * 80)
 
         # Define search strategies to try in order
+        translation_info = None
+
+        # First step: try translation search (returns tuple: results, translation_info)
+        _log_search_step("1", "Searching with translation")
+        results, translation_info = _search_with_translation(
+            keyword_stripped, progress_messages)
+
+        if results:
+            _log_search_step("1", "Searching with translation",
+                             success=True, count=len(results))
+            return _process_search_results(results, keyword_stripped, progress_messages, translation_info)
+
+        _log_search_step("1", "Searching with translation", success=False)
+
+        # Other search strategies
         search_steps = [
-            ("1", "Searching with translation", lambda: _search_with_translation(
-                keyword_stripped, progress_messages)),
             ("2", "Searching aliases", lambda: _search_aliases(
                 keyword_stripped, progress_messages)),
             ("2b", "Checking aliases for translation", lambda: _check_translated_aliases(
@@ -212,7 +227,7 @@ def search_for_explainer(keyword: str) -> Dict[str, Any]:
                 keyword_stripped, progress_messages)),
         ]
 
-        # Execute search steps
+        # Execute remaining search steps
         for step_num, description, search_func in search_steps:
             _log_search_step(step_num, description)
             results = search_func()
@@ -220,7 +235,7 @@ def search_for_explainer(keyword: str) -> Dict[str, Any]:
             if results:
                 _log_search_step(step_num, description,
                                  success=True, count=len(results))
-                return _process_search_results(results, keyword_stripped, progress_messages)
+                return _process_search_results(results, keyword_stripped, progress_messages, translation_info)
 
             _log_search_step(step_num, description, success=False)
 
@@ -784,6 +799,14 @@ def _search_database(keyword: str, progress_messages: List[str] = None, emit: Op
     if results:
         logger.info(
             f"[DB SEARCH] ✓ Found {len(results)} results for '{keyword}'")
+
+        # Tag each result with the keyword that matched it
+        for r in results:
+            if '_matching_keywords' not in r:
+                r['_matching_keywords'] = []
+            if keyword not in r['_matching_keywords']:
+                r['_matching_keywords'].append(keyword)
+
         msg = f"Found for {keyword}"
         if emit:
             emit(msg)
@@ -795,20 +818,26 @@ def _search_database(keyword: str, progress_messages: List[str] = None, emit: Op
     return []
 
 
-def _search_with_translation(keyword: str, progress_messages: List[str] = None, emit: Optional[callable] = None) -> List[Dict]:
-    """Search for both original keyword and its translation. Returns combined results."""
-    all_results = []
-    seen_keys = set()
+def _search_with_translation(keyword: str, progress_messages: List[str] = None, emit: Optional[callable] = None) -> tuple:
+    """Search for both original keyword and its translation. Returns combined, deduplicated results.
+
+    Always searches both the original term and its translation (if available) to ensure
+    comprehensive results regardless of language. Results are deduplicated by (doc_id, section_heading).
+
+    Returns:
+        tuple: (results: List[Dict], translation_info: Dict[str, str])
+        translation_info contains 'original' and 'translation' keys
+    """
+    results_map = {}  # Map (doc_id, section_heading) -> result object
     translation = None
     detected_lang = None
 
     logger.info("=" * 80)
     logger.info(f"[SEARCH] Starting search for keyword: '{keyword}'")
 
-    # Always add initial progress message, even if translation fails
-    msg = f"Searching for '{keyword}'"
-
     # Step 1: Try to detect language and translate
+    search_terms = [keyword]
+
     try:
         from backend.services.translation_synonym_service import translate_with_google, detect_language_local
 
@@ -816,64 +845,78 @@ def _search_with_translation(keyword: str, progress_messages: List[str] = None, 
         logger.info(f"[SEARCH] Detected language: {detected_lang}")
 
         trans_result = translate_with_google(keyword)
-        logger.info(f"[SEARCH] Translation result: {trans_result}")
-
         if trans_result.get('success'):
             translation = trans_result.get('translated_text', '')
-            logger.info(
-                f"[SEARCH] Translation: '{keyword}' -> '{translation}'")
-            if translation and translation.lower() != keyword.lower():
-                # Update message with both languages
-                msg = f"Searching for '{keyword}' '{translation}'"
-                logger.info(f"[SEARCH] Updated search message: {msg}")
-            else:
-                logger.info(
-                    f"[SEARCH] Translation same as original or empty, using original only")
+            if translation and translation.strip():
+                translation_clean = translation.strip()
+                if translation_clean.lower() != keyword.lower():
+                    search_terms.append(translation_clean)
+
         else:
             logger.warning(
                 f"[SEARCH] Translation failed: {trans_result.get('error', 'Unknown error')}")
     except Exception as e:
         logger.warning(f"[SEARCH] Translation exception: {e}")
-        import traceback
-        logger.warning(f"[SEARCH] Traceback: {traceback.format_exc()}")
 
-    # Always emit the message (whether translation succeeded or not)
-    logger.info(f"[SEARCH] Final search message: {msg}")
+    # Build message
+    msg = f"Searching for '{search_terms[0]}'" + \
+        (f" and '{search_terms[1]}'" if len(search_terms) > 1 else "")
     if emit:
         emit(msg)
     if progress_messages is not None:
         progress_messages.append(msg)
 
-    # Step 2: Search for original keyword
-    results = _search_database(keyword, progress_messages, emit)
-    if results:
-        for r in results:
-            key = (r.get('doc_id'), r.get('section_heading'))
-            if key not in seen_keys:
-                all_results.append(r)
-                seen_keys.add(key)
-
-    # Step 3: Search for translated keyword
-    if translation and translation.lower() != keyword.lower():
-        results = _search_database(translation, progress_messages, emit)
+    # Step 2: Search for each term and combine results (with keyword merging)
+    for search_term in search_terms:
+        results = _search_database(search_term, progress_messages, emit)
         if results:
             for r in results:
-                key = (r.get('doc_id'), r.get('section_heading'))
-                if key not in seen_keys:
-                    all_results.append(r)
-                    seen_keys.add(key)
+                doc_id = r.get('doc_id', '') or ''
+                section = r.get('section_heading')
+                key = (doc_id, section)
 
-    # Step 4: Check if keyword is a main keyword with aliases - if so, also search aliases
-    # This ensures main keywords return all alias results, not just direct matches
+                if key in results_map:
+                    # Merge matching keywords
+                    existing = results_map[key]
+                    new_keywords = r.get('_matching_keywords', [])
+                    if '_matching_keywords' not in existing:
+                        existing['_matching_keywords'] = []
+                    for kw in new_keywords:
+                        if kw not in existing['_matching_keywords']:
+                            existing['_matching_keywords'].append(kw)
+                else:
+                    results_map[key] = r
+
+    # Step 3: Check aliases
     alias_results = _search_aliases(keyword, progress_messages, emit)
     if alias_results:
         for r in alias_results:
-            key = (r.get('doc_id'), r.get('section_heading'))
-            if key not in seen_keys:
-                all_results.append(r)
-                seen_keys.add(key)
+            doc_id = r.get('doc_id', '') or ''
+            section = r.get('section_heading')
+            key = (doc_id, section)
 
-    return all_results
+            if key in results_map:
+                existing = results_map[key]
+                new_keywords = r.get('_matching_keywords', [])
+                if '_matching_keywords' not in existing:
+                    existing['_matching_keywords'] = []
+                for kw in new_keywords:
+                    if kw not in existing['_matching_keywords']:
+                        existing['_matching_keywords'].append(kw)
+            else:
+                results_map[key] = r
+
+    all_results = list(results_map.values())
+    logger.info(
+        f"[SEARCH] Final combined result: {len(all_results)} unique combinations")
+
+    # Return results and translation info
+    translation_info = {
+        'original': keyword,
+        'translation': translation.strip() if translation and translation.strip() and translation.strip().lower() != keyword.lower() else None
+    }
+
+    return all_results, translation_info
 
 
 def _try_translation_and_synonyms(keyword: str, progress_messages: List[str] = None, emit: Optional[callable] = None, add_progress: bool = False) -> List[Dict]:
@@ -1020,10 +1063,16 @@ def search_for_explainer_stream(keyword: str) -> Generator[str, None, None]:
             message_list.append(msg)
 
         # Step 1: Search database for original keyword AND its translation immediately
-        results = _search_with_translation(
+        translation_result = _search_with_translation(
             keyword_stripped, emit=emit_callback)
         while message_list:
             yield from emit(message_list.pop(0))
+
+        # Handle tuple return from _search_with_translation
+        if isinstance(translation_result, tuple) and len(translation_result) == 2:
+            results, _ = translation_result
+        else:
+            results = translation_result if translation_result else []
 
         if results:
             yield from emit("__DONE__")

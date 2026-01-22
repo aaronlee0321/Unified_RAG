@@ -18,9 +18,6 @@ from time import sleep
 
 
 # --- Simple in-memory progress tracking and job execution ---
-import uuid
-import threading
-from time import sleep
 
 # Global dict: job_id -> progress info
 UPLOAD_JOBS = {}  # { job_id: {"status": "running|success|error", "step": "...", "message": "", "doc_id": None, "chunks_count": None } }
