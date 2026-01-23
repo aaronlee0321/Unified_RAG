@@ -958,14 +958,12 @@ def explainer_explain():
 
         data = request.get_json()
         keyword = data.get('keyword', '')
-        # Array of keywords from filter checkboxes
-        selected_keywords = data.get('selected_keywords', [])
         selected_choices = data.get('selected_choices', [])
         stored_results = data.get('stored_results', [])
         language = data.get('language', 'en')  # 'en' or 'vn'
 
         result = generate_explanation(
-            keyword, selected_choices, stored_results, language=language, selected_keywords=selected_keywords)
+            keyword, selected_choices, stored_results, language=language)
         return jsonify(result)
     except Exception as e:
         app.logger.error(f"Error in explainer explain: {e}")

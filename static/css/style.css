@@ -2421,13 +2421,13 @@ main {
 }
 
 .doc-row-name {
-    flex: 1;
+    flex: 1 1 0;
+    flex-grow: 1;
     font-size: 0.8125rem;
     font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     min-width: 0;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 .doc-row-count {
@@ -2475,10 +2475,8 @@ main {
     flex: 1;
     font-size: 0.75rem;
     color: var(--muted-foreground);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     min-width: 0;
+    word-break: break-word;
 }
 
 .section-row.selected .section-row-title {

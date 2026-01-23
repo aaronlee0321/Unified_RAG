@@ -1117,10 +1117,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function formatDocName(docName) {
-        // Truncate long document names for display
-        if (docName.length > 40) {
-            return docName.substring(0, 37) + '...';
-        }
+        // Return full name - CSS handles wrapping when sidebar is extended
         return docName;
     }
 
