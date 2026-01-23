@@ -2024,6 +2024,19 @@ document.addEventListener('DOMContentLoaded', function () {
             docRow.style.display = hasVisibleChild ? '' : 'none';
         });
 
+        // After filtering, uncheck all hidden sections
+        // This ensures that when a filter checkbox is unchecked, excluded sections are also deselected
+        const allSectionRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
+        allSectionRows.forEach(row => {
+            if (row.style.display === 'none') {
+                const checkbox = row.querySelector('.section-row-checkbox');
+                if (checkbox && checkbox.checked) {
+                    checkbox.checked = false;
+                    updateSectionSelection(row, false);
+                }
+            }
+        });
+
         // Update document counts after filtering
         const allDocRows = explainerResultsCheckboxes.querySelectorAll('.doc-row');
         allDocRows.forEach(docRow => {
