@@ -1243,11 +1243,38 @@ document.addEventListener('DOMContentLoaded', function () {
                 explanationKeyword = foundAliasKW.name;
             }
 
+            // Collect selected keywords from filter checkboxes
+            let selectedKeywords = [explanationKeyword]; // Default to original keyword
+
+            if (translationInfo) {
+                const enChecked = queryCheckboxEn ? queryCheckboxEn.checked : true;
+                const vnChecked = queryCheckboxVn ? queryCheckboxVn.checked : false;
+                const vnEnabled = queryCheckboxVn ? !queryCheckboxVn.disabled : false;
+
+                selectedKeywords = [];
+
+                // Add original keyword if EN checkbox is checked
+                if (enChecked && translationInfo.original) {
+                    selectedKeywords.push(translationInfo.original);
+                }
+
+                // Add translated keyword if VN checkbox is checked and enabled
+                if (vnChecked && vnEnabled && translationInfo.translation) {
+                    selectedKeywords.push(translationInfo.translation);
+                }
+
+                // If neither is checked, default to original keyword
+                if (selectedKeywords.length === 0) {
+                    selectedKeywords = [explanationKeyword];
+                }
+            }
+
             const response = await fetch('/api/gdd/explainer/explain', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     keyword: explanationKeyword,
+                    selected_keywords: selectedKeywords,
                     selected_choices: selectedChoices,
                     stored_results: storedResults,
                     language: selectedLanguage

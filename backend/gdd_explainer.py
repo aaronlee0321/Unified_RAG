@@ -259,7 +259,7 @@ def search_for_explainer(keyword: str) -> Dict[str, Any]:
         )
 
 
-def generate_explanation(keyword: str, selected_choices: List[str], stored_results: List[Dict], language: str = 'en') -> Dict[str, Any]:
+def generate_explanation(keyword: str, selected_choices: List[str], stored_results: List[Dict], language: str = 'en', selected_keywords: List[str] = None) -> Dict[str, Any]:
     """
     Generate explanation from selected items.
     EXACT COPY from keyword_extractor - adapted to return dict instead of Gradio components.
@@ -269,6 +269,7 @@ def generate_explanation(keyword: str, selected_choices: List[str], stored_resul
         selected_choices: List of selected choice labels
         stored_results: Stored search results data
         language: Language preference ('en' or 'vn')
+        selected_keywords: List of keywords selected from filter checkboxes (e.g., ['grass', 'cỏ'])
 
     Returns:
         Dict with 'explanation', 'source_chunks', 'metadata', 'success'
@@ -292,6 +293,10 @@ def generate_explanation(keyword: str, selected_choices: List[str], stored_resul
         }
 
     try:
+        # Normalize selected_keywords: use provided list or default to [keyword]
+        if not selected_keywords or len(selected_keywords) == 0:
+            selected_keywords = [keyword.strip()]
+
         # Time the validation step
         validation_start_time = time.perf_counter()
 
@@ -409,7 +414,7 @@ def generate_explanation(keyword: str, selected_choices: List[str], stored_resul
 
                         # Generate explanation for this keyword in this section
                         section_result = explain_keyword(
-                            kw, keyword_selected_items, use_hyde=True, language=language)
+                            kw, keyword_selected_items, use_hyde=True, language=language, selected_keywords=selected_keywords)
 
                         if section_result and not section_result.get('error'):
                             all_section_results.append({
@@ -430,7 +435,7 @@ def generate_explanation(keyword: str, selected_choices: List[str], stored_resul
                 if single_keyword_sections:
                     # Generate explanation for single-keyword sections normally
                     single_result = explain_keyword(
-                        keyword.strip(), single_keyword_sections, use_hyde=True, language=language)
+                        keyword.strip(), single_keyword_sections, use_hyde=True, language=language, selected_keywords=selected_keywords)
                     if single_result and not single_result.get('error'):
                         # Add as a combined result
                         all_section_results.append({
@@ -444,11 +449,11 @@ def generate_explanation(keyword: str, selected_choices: List[str], stored_resul
             else:
                 # No multi-keyword results, use normal flow
                 result = explain_keyword(
-                    keyword.strip(), selected_items, use_hyde=True, language=language)
+                    keyword.strip(), selected_items, use_hyde=True, language=language, selected_keywords=selected_keywords)
         else:
             # No multi-keyword sections, use normal behavior
             result = explain_keyword(
-                keyword.strip(), selected_items, use_hyde=True, language=language)
+                keyword.strip(), selected_items, use_hyde=True, language=language, selected_keywords=selected_keywords)
             all_section_results = []  # Initialize for consistency
 
         # Combine all explanations if we have multi-keyword results

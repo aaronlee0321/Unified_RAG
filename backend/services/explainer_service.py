@@ -283,17 +283,20 @@ def _explain_single_section(
     hyde_query: str,
     doc_name_map: Dict[str, str],
     detected_language: str,
+    selected_keywords: List[str] = None,
 ) -> Dict[str, Any]:
     """
     Generate explanation for a single section.
 
     Args:
-        keyword: Original keyword query
+        keyword: Original keyword query (used for HYDE)
         doc_id: Document ID
         section_heading: Section heading (can be None)
         hyde_query: HYDE-expanded query
         doc_name_map: Mapping of doc_id to document name
         detected_language: Detected language ('english' or 'vietnamese')
+        selected_keywords: List of keywords selected from filter checkboxes (e.g., ['grass', 'cỏ']).
+                          Used in LLM prompt. If None, uses keyword.
 
     Returns:
         Dict with 'explanation', 'source_chunks', 'citations', 'error', etc.
@@ -311,17 +314,37 @@ def _explain_single_section(
             }
 
         # Get keyword-matched chunks for relevance scoring
-        matched_chunks = keyword_search(
-            hyde_query, limit=20, doc_id_filter=doc_id)
-        matched_in_section = [
-            c for c in matched_chunks
-            if c.get('section_heading') == section_heading or
-            (section_heading is None and c.get('section_heading') is None)
-        ]
+        # Search for ALL selected keywords (not just hyde_query) to include chunks matching any keyword
+        keywords_for_search = selected_keywords if selected_keywords and len(
+            selected_keywords) > 0 else [keyword]
 
-        # Create a relevance map from matched chunks
-        relevance_map = {c.get('chunk_id'): c.get('relevance', 0.0)
-                         for c in matched_in_section}
+        # Combine matched chunks from all selected keywords
+        all_matched_chunks = []
+        for search_keyword in keywords_for_search:
+            matched_chunks = keyword_search(
+                search_keyword, limit=20, doc_id_filter=doc_id)
+            all_matched_chunks.extend(matched_chunks)
+
+        # Filter to section and deduplicate by chunk_id
+        matched_in_section = []
+        seen_chunk_ids = set()
+        for c in all_matched_chunks:
+            chunk_id = c.get('chunk_id')
+            if chunk_id and chunk_id not in seen_chunk_ids:
+                if (c.get('section_heading') == section_heading or
+                        (section_heading is None and c.get('section_heading') is None)):
+                    matched_in_section.append(c)
+                    seen_chunk_ids.add(chunk_id)
+
+        # Create a relevance map from matched chunks (use max relevance if chunk appears multiple times)
+        relevance_map = {}
+        for c in matched_in_section:
+            chunk_id = c.get('chunk_id')
+            if chunk_id:
+                current_relevance = c.get('relevance', 0.0)
+                # Use max relevance if chunk matches multiple keywords
+                if chunk_id not in relevance_map or current_relevance > relevance_map[chunk_id]:
+                    relevance_map[chunk_id] = current_relevance
 
         # Combine section chunks with relevance scores
         chunks_with_relevance = []
@@ -400,16 +423,29 @@ def _explain_single_section(
         else:
             language_instruction = "IMPORTANT: Respond in English. Your entire answer must be in English."
 
+        # Build keyword string for prompt (use all selected keywords)
+        keywords_for_prompt = selected_keywords if selected_keywords and len(
+            selected_keywords) > 0 else [keyword]
+        if len(keywords_for_prompt) == 1:
+            keyword_string = keywords_for_prompt[0]
+        else:
+            # Format multiple keywords: "grass and cỏ" or "grass, cỏ, and keyword3"
+            if len(keywords_for_prompt) == 2:
+                keyword_string = f"{keywords_for_prompt[0]} and {keywords_for_prompt[1]}"
+            else:
+                keyword_string = ", ".join(
+                    keywords_for_prompt[:-1]) + f", and {keywords_for_prompt[-1]}"
+
         # Build prompt (same format as before, but for single section)
-        prompt = f"""Based on the following document chunks, provide a detailed explanation for: {keyword}
+        prompt = f"""Based on the following document chunks, provide a detailed explanation for: {keyword_string}
 
 {language_instruction}
 
 FOCUS REQUIREMENT:
-- Focus ONLY on information directly related to: {keyword}
-- If a chunk does not contain information about {keyword}, SKIP IT ENTIRELY. Do NOT include it in your response.
+- Focus ONLY on information directly related to: {keyword_string}
+- If a chunk does not contain information about {keyword_string}, SKIP IT ENTIRELY. Do NOT include it in your response.
 - Do NOT explain chunks that are irrelevant to the keyword query.
-- Only include information that is directly relevant to explaining {keyword}.
+- Only include information that is directly relevant to explaining {keyword_string}.
 - Do NOT include any statements about missing information such as "The document does not specify this" or "The document does not provide information about X".
 
 Note:
@@ -432,7 +468,7 @@ OUTPUT FORMAT REQUIREMENTS:
 - After the section title, add a blank line, then write a paragraph explaining that chunk's content.
 - Each section must be separated by a blank line.
 - Do NOT combine multiple chunks into one section.
-- Only explain chunks that contain information relevant to {keyword}. If a chunk is irrelevant, SKIP IT COMPLETELY - do not include it in your response at all.
+- Only explain chunks that contain information relevant to {keyword_string}. If a chunk is irrelevant, SKIP IT COMPLETELY - do not include it in your response at all.
 
 EXAMPLE OUTPUT FORMAT:
 1. Tank Stats
@@ -536,16 +572,19 @@ def explain_keyword(
     selected_items: List[Dict[str, str]],
     use_hyde: bool = True,
     language: str = None,
+    selected_keywords: List[str] = None,
 ) -> Dict[str, Any]:
     """
     Generate detailed explanation for a keyword from selected documents/sections.
     Processes each section separately and combines the results.
 
     Args:
-        keyword: Keyword/query to explain
+        keyword: Keyword/query to explain (original keyword, used for HYDE)
         selected_items: List of dicts with 'doc_id' and optional 'section_heading'
         use_hyde: Whether to use HYDE query expansion
         language: Language preference ('en' or 'vn'). If None, auto-detects from keyword.
+        selected_keywords: List of keywords selected from filter checkboxes (e.g., ['grass', 'cỏ']).
+                          Used in LLM prompt. If None, uses keyword.
 
     Returns:
         Dict with 'explanation', 'source_chunks', 'hyde_query', 'language', etc.
@@ -647,6 +686,10 @@ def explain_keyword(
         sorted_sections = sorted(chunks_by_section.items(),
                                  key=lambda x: x[1][0].get('chunk_id', '') or '' if x[1] else '')
 
+        # Normalize selected_keywords: use provided list or default to [keyword]
+        keywords_for_prompt = selected_keywords if selected_keywords and len(
+            selected_keywords) > 0 else [keyword]
+
         for (doc_id, section_heading), section_chunks in sorted_sections:
             # Process this section
             result = _explain_single_section(
@@ -655,7 +698,8 @@ def explain_keyword(
                 section_heading=section_heading,
                 hyde_query=hyde_query,
                 doc_name_map=doc_name_map,
-                detected_language=detected_language
+                detected_language=detected_language,
+                selected_keywords=keywords_for_prompt
             )
 
             if result.get('error'):
