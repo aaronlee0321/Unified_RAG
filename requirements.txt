@@ -19,7 +19,7 @@ dashscope>=1.25.0
 # lightrag-hku>=1.4.9.8
 docling>=1.0.0  # PDF to Markdown conversion (optional - falls back to PyPDF2 if not installed)
 
-# Keyword Extractor backend dependencies (for document upload/processing)
+# Keyword Extractor backenpendencies (for document upload/processing)
 langchain-text-splitters>=0.0.1  # Text chunking utilities
 pypdf2>=3.0.0  # PDF fallback extraction
 
@@ -33,3 +33,9 @@ cohere>=4.0.0
 
 # Free LLM options
 google-genai>=0.2.0  # For Google Gemini (FREE tier)
+
+# Translation and Language Detection
+deep-translator>=1.11.4  # Free Google Translate API (no API key needed)
+fast-langdetect>=0.1.0  # Fast language detection (80x faster than fastText)
+nltk>=3.8.1  # Natural Language Toolkit (for WordNet synonym generation)
+# Note: NLTK data (wordnet, omw-1.4) is downloaded automatically on first use

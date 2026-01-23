@@ -488,7 +488,19 @@ Chunks:
             section_timing = round(llm_end_time - llm_start_time, 2)
 
             # Post-process: Remove statements about missing information
+            original_explanation = explanation
             explanation = _filter_missing_info_statements(explanation)
+
+            # If filtering removed all content, keep the original (but log a warning)
+            # This prevents valid explanations from being completely filtered out
+            if not explanation or not explanation.strip():
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"Filtering removed all content for section {section_heading} in {doc_id}. "
+                    f"Keeping original explanation to prevent empty result."
+                )
+                explanation = original_explanation.strip() if original_explanation else None
 
             # Create section label for timing display
             doc_name = doc_name_map.get(doc_id, doc_id)
@@ -650,10 +662,12 @@ def explain_keyword(
                 errors.append(
                     f"{doc_name_map.get(doc_id, doc_id)} - {section_heading or 'No section'}: {result['error']}")
 
-            if result.get('explanation'):
+            # Check if explanation exists and is not empty/whitespace
+            explanation_text = result.get('explanation')
+            if explanation_text and explanation_text.strip():
                 # Add citation to this section's explanation
                 explanation_with_citation = _add_citation_to_text(
-                    result['explanation'], citation_counter)
+                    explanation_text, citation_counter)
 
                 # Build citation map for this section (use first chunk for citation info)
                 source_chunks = result.get('source_chunks', [])
@@ -688,9 +702,21 @@ def explain_keyword(
 
         # Step 6: Combine all section explanations
         if not section_results:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"No explanations generated for keyword '{keyword}'. "
+                f"Processed {len(sorted_sections)} sections, "
+                f"found {len(all_source_chunks)} source chunks. "
+                f"Errors: {errors if errors else 'None'}"
+            )
+
             error_msg = 'No explanations generated. '
             if errors:
                 error_msg += 'Errors: ' + '; '.join(errors)
+            else:
+                error_msg += 'All generated explanations were filtered out or empty. This may indicate that the content does not match the keyword query.'
+
             return {
                 'explanation': error_msg,
                 'source_chunks': all_source_chunks,

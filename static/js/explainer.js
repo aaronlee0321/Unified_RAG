@@ -160,16 +160,11 @@ document.addEventListener('DOMContentLoaded', function () {
     if (languageToggle) {
         languageToggle.addEventListener('change', function () {
             selectedLanguage = this.checked ? 'vn' : 'en';
-            // Store in sessionStorage for persistence
-            sessionStorage.setItem('explainer_language', selectedLanguage);
         });
 
-        // Load saved language preference
-        const savedLanguage = sessionStorage.getItem('explainer_language');
-        if (savedLanguage) {
-            selectedLanguage = savedLanguage;
-            languageToggle.checked = savedLanguage === 'vn';
-        }
+        // Sync selectedLanguage with checkbox's current state on initialization
+        // This ensures the visual state matches the actual value used for generation
+        selectedLanguage = languageToggle.checked ? 'vn' : 'en';
     }
 
     // Initialize button state
