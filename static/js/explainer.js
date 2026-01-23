@@ -30,6 +30,8 @@ document.addEventListener('DOMContentLoaded', function () {
     let selectedLanguage = 'en'; // Language preference: 'en' or 'vn'
     let translationInfo = null; // Store translation info from search: { original, translation }
     let currentCitations = {}; // Store citations map from explanation response: { citation_number: { doc_id, doc_name, section_heading, chunk_id } }
+    let generationInProgress = false; // Track if explanation generation is in progress
+    let previewLoadingInProgress = false; // Track if preview is being loaded
 
     // Hierarchical view state
     let expandedDocs = new Set(); // Track which documents are expanded
@@ -98,8 +100,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
         aliasesDrawer.classList.add('open');
         loadAliases();
+        saveExplainerState(); // Save state when drawer opens
     });
-    if (closeAliasesBtn) closeAliasesBtn.addEventListener('click', () => aliasesDrawer.classList.remove('open'));
+    if (closeAliasesBtn) closeAliasesBtn.addEventListener('click', () => {
+        aliasesDrawer.classList.remove('open');
+        saveExplainerState(); // Save state when drawer closes
+    });
 
     // Prevent clicks inside the drawer from propagating (e.g., collapsing sidebar)
     if (aliasesDrawer) {
@@ -119,6 +125,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
             if (!isInsideDrawer && !isButton && !isModal) {
                 aliasesDrawer.classList.remove('open');
+                saveExplainerState(); // Save state when drawer closes
             }
         }
     });
@@ -160,6 +167,8 @@ document.addEventListener('DOMContentLoaded', function () {
     if (languageToggle) {
         languageToggle.addEventListener('change', function () {
             selectedLanguage = this.checked ? 'vn' : 'en';
+            // Save state after language toggle changes
+            saveExplainerState();
         });
 
         // Sync selectedLanguage with checkbox's current state on initialization
@@ -167,17 +176,258 @@ document.addEventListener('DOMContentLoaded', function () {
         selectedLanguage = languageToggle.checked ? 'vn' : 'en';
     }
 
+    // Flag to prevent saving during restore
+    let isRestoring = false;
+
+    // State persistence functions
+    function saveExplainerState() {
+        if (isRestoring) return; // Don't save during restore
+        try {
+            const selectedChoices = getSelectedChoices();
+            const previewPanel = document.getElementById('section-preview-panel');
+            const previewContent = document.getElementById('preview-content');
+            const previewDocName = document.getElementById('preview-doc-name');
+            const previewSectionTitle = document.getElementById('preview-section-title');
+
+            const state = {
+                keyword: explainerKeyword.value,
+                storedResults: storedResults,
+                lastSearchKeyword: lastSearchKeyword,
+                selectedLanguage: selectedLanguage,
+                translationInfo: translationInfo,
+                expandedDocs: Array.from(expandedDocs),
+                activePreviewId: activePreviewId,
+                queryCheckboxEn: queryCheckboxEn ? queryCheckboxEn.checked : true,
+                queryCheckboxVn: queryCheckboxVn ? queryCheckboxVn.checked : false,
+                explanationOutput: explanationOutput ? explanationOutput.innerHTML : '',
+                currentCitations: currentCitations,
+                selectedChoices: selectedChoices,
+                aliasesDrawerOpen: aliasesDrawer ? aliasesDrawer.classList.contains('open') : false,
+                previewPanelOpen: previewPanel ? !previewPanel.classList.contains('hidden') : false,
+                previewContent: previewContent ? previewContent.innerHTML : '',
+                previewDocName: previewDocName ? previewDocName.textContent : '',
+                previewSectionTitle: previewSectionTitle ? previewSectionTitle.textContent : '',
+                generationInProgress: generationInProgress,
+                previewLoadingInProgress: previewLoadingInProgress
+            };
+            sessionStorage.setItem('explainer_state', JSON.stringify(state));
+            console.log('[Explainer] State saved to sessionStorage');
+        } catch (e) {
+            console.error('[Explainer] Error saving state:', e);
+        }
+    }
+
+    function restoreExplainerState() {
+        isRestoring = true; // Set flag to prevent saving during restore
+        try {
+            const savedState = sessionStorage.getItem('explainer_state');
+            if (!savedState) {
+                console.log('[Explainer] No saved state found');
+                return false;
+            }
+
+            console.log('[Explainer] Restoring state from sessionStorage');
+            const state = JSON.parse(savedState);
+
+            // Restore basic state
+            if (state.keyword) explainerKeyword.value = state.keyword;
+            if (state.storedResults) storedResults = state.storedResults;
+            if (state.lastSearchKeyword) lastSearchKeyword = state.lastSearchKeyword;
+            if (state.selectedLanguage) selectedLanguage = state.selectedLanguage;
+            if (state.translationInfo) translationInfo = state.translationInfo;
+            if (state.expandedDocs) expandedDocs = new Set(state.expandedDocs);
+            if (state.activePreviewId) activePreviewId = state.activePreviewId;
+            if (state.currentCitations) currentCitations = state.currentCitations;
+            if (state.generationInProgress !== undefined) {
+                generationInProgress = state.generationInProgress;
+                console.log('[Explainer] Restored generationInProgress:', generationInProgress, 'hasExplanationOutput:', !!state.explanationOutput);
+            }
+            if (state.previewLoadingInProgress !== undefined) {
+                previewLoadingInProgress = state.previewLoadingInProgress;
+            }
+
+            // Restore language toggle
+            if (languageToggle) {
+                languageToggle.checked = selectedLanguage === 'vn';
+            }
+
+            // Restore filter checkboxes
+            if (queryCheckboxEn && state.queryCheckboxEn !== undefined) {
+                queryCheckboxEn.checked = state.queryCheckboxEn;
+            }
+            if (queryCheckboxVn && state.queryCheckboxVn !== undefined) {
+                queryCheckboxVn.checked = state.queryCheckboxVn;
+            }
+
+            // Restore UI if we have stored results
+            if (storedResults && storedResults.length > 0) {
+                // Show results container
+                explainerResultsContainer.style.display = 'flex';
+                const emptyLeft = document.getElementById('explainer-empty-left');
+                if (emptyLeft) emptyLeft.style.display = 'none';
+
+                // Convert storedResults back to choice labels (format: "docName → section")
+                // renderCheckboxes expects an array of choice label strings, not storedResults objects
+                const choiceLabels = storedResults.map(item => {
+                    const displayName = item.doc_name || 'Unknown Document';
+                    const sectionDisplay = item.section_heading || "(No section)";
+                    return `${displayName} → ${sectionDisplay}`;
+                });
+
+                renderCheckboxes(choiceLabels);
+                applyQueryFilter();
+
+                // Restore expanded documents
+                expandedDocs.forEach(docId => {
+                    const sectionsContainer = document.getElementById(`sections-${docId}`);
+                    if (sectionsContainer) {
+                        sectionsContainer.classList.add('expanded');
+                        const chevron = document.querySelector(`[data-doc-id="${docId}"] .doc-row-chevron`);
+                        if (chevron) {
+                            chevron.classList.add('expanded');
+                        }
+                    }
+                });
+
+                // Restore selected checkboxes based on stored selectedChoices
+                if (state.selectedChoices && state.selectedChoices.length > 0) {
+                    // Restore checkbox states by matching choice labels
+                    state.selectedChoices.forEach(choiceLabel => {
+                        const sectionRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
+                        sectionRows.forEach(row => {
+                            const checkbox = row.querySelector('.section-row-checkbox');
+                            if (checkbox && checkbox.value === choiceLabel) {
+                                checkbox.checked = true;
+                                updateSectionSelection(row, true);
+                            }
+                        });
+                    });
+
+                    // Update document checkbox states
+                    const allDocIds = new Set();
+                    storedResults.forEach(item => {
+                        if (item.doc_id) allDocIds.add(item.doc_id);
+                    });
+                    allDocIds.forEach(docId => {
+                        updateDocCheckboxState(docId);
+                    });
+                }
+
+                // Restore explanation output if it exists
+                if (state.explanationOutput && explanationOutput) {
+                    explanationOutput.innerHTML = state.explanationOutput;
+                    explanationOutput.style.display = 'block';
+                    // If explanation exists, generation is no longer in progress
+                    generationInProgress = false;
+                }
+            }
+
+            // Check for interrupted generation (outside storedResults block)
+            // This handles cases where generation was in progress but no explanation was saved
+            if (state.generationInProgress && !state.explanationOutput && explanationOutput) {
+                console.log('[Explainer] Detected interrupted generation:', {
+                    generationInProgress: state.generationInProgress,
+                    hasExplanationOutput: !!state.explanationOutput
+                });
+                explanationOutput.style.display = 'block';
+                explanationOutput.innerHTML = `
+                    <div class="placeholder-text" style="text-align: center; padding: 32px;">
+                        <p style="color: var(--muted-foreground); margin-bottom: 12px;">
+                            Explanation generation was interrupted when you switched tabs.
+                        </p>
+                        <p style="color: var(--muted-foreground); font-size: 0.875rem;">
+                            Please click "Generate Explanation" again to regenerate.
+                        </p>
+                    </div>
+                `;
+                generationInProgress = false; // Reset flag
+                saveExplainerState(); // Save updated state
+            }
+
+            // Restore aliases drawer state (outside storedResults check)
+            if (state.aliasesDrawerOpen && aliasesDrawer) {
+                aliasesDrawer.classList.add('open');
+                loadAliases(); // Load aliases when drawer is opened
+            }
+
+            // Restore preview panel state (must be after renderCheckboxes so sections exist)
+            // Use setTimeout to ensure DOM is ready after renderCheckboxes
+            if (state.previewPanelOpen && state.activePreviewId && state.previewContent) {
+                setTimeout(() => {
+                    const previewPanel = document.getElementById('section-preview-panel');
+                    const previewContent = document.getElementById('preview-content');
+                    const previewDocName = document.getElementById('preview-doc-name');
+                    const previewSectionTitle = document.getElementById('preview-section-title');
+                    const explainerRight = document.querySelector('.explainer-right');
+
+                    if (previewPanel && previewContent) {
+                        // Restore preview content
+                        previewContent.innerHTML = state.previewContent;
+                        if (state.previewDocName && previewDocName) {
+                            previewDocName.textContent = state.previewDocName;
+                        }
+                        if (state.previewSectionTitle && previewSectionTitle) {
+                            previewSectionTitle.textContent = state.previewSectionTitle;
+                        }
+
+                        // Show preview panel
+                        previewPanel.classList.remove('hidden');
+                        if (explainerRight) {
+                            explainerRight.classList.add('preview-open');
+                        }
+
+                        // Update active state in sidebar (activePreviewId is already restored above)
+                        updatePreviewActiveState();
+                    }
+                }, 100);
+            }
+
+            updateGenerateButtonState();
+            isRestoring = false; // Clear flag after restore
+            console.log('[Explainer] State restored successfully');
+            return true;
+        } catch (e) {
+            console.error('[Explainer] Error restoring state:', e);
+            isRestoring = false; // Clear flag on error
+            return false;
+        }
+    }
+
+    // Save state before page unload and warn if operations are in progress
+    window.addEventListener('beforeunload', (e) => {
+        saveExplainerState();
+
+        // Warn user if generation or preview is in progress
+        if (generationInProgress || previewLoadingInProgress) {
+            // Modern browsers require returnValue to be set
+            e.preventDefault();
+            e.returnValue = ''; // Chrome requires returnValue to be set
+
+            // Return a message (though modern browsers ignore custom messages)
+            return 'Explanation generation or preview loading is in progress. Are you sure you want to leave?';
+        }
+    });
+
+    // Also save state periodically and on key state changes
+    setInterval(saveExplainerState, 5000); // Save every 5 seconds
+
     // Initialize button state
     updateGenerateButtonState();
 
-    // Initialize empty state - show results container with count 0
-    const resultsCountNumber = document.getElementById('results-count-number');
-    const selectedCountBadge = document.getElementById('selected-count-badge');
-    if (resultsCountNumber) resultsCountNumber.textContent = '0';
-    if (selectedCountBadge) selectedCountBadge.textContent = '0';
-    explainerResultsContainer.style.display = 'flex';
-    const emptyLeft = document.getElementById('explainer-empty-left');
-    if (emptyLeft) emptyLeft.style.display = 'none';
+    // Try to restore state on page load
+    const restored = restoreExplainerState();
+
+    // Only initialize empty state if restore failed (no saved state)
+    if (!restored) {
+        // Initialize empty state - show results container with count 0
+        const resultsCountNumber = document.getElementById('results-count-number');
+        const selectedCountBadge = document.getElementById('selected-count-badge');
+        if (resultsCountNumber) resultsCountNumber.textContent = '0';
+        if (selectedCountBadge) selectedCountBadge.textContent = '0';
+        explainerResultsContainer.style.display = 'flex';
+        const emptyLeft = document.getElementById('explainer-empty-left');
+        if (emptyLeft) emptyLeft.style.display = 'none';
+    }
 
     // Helper function to display progress messages sequentially
     function displayProgressMessages(messages, container) {
@@ -352,6 +602,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
             // Apply query filter after rendering
             applyQueryFilter();
+
+            // Save state after search completes
+            saveExplainerState();
 
             if (count > 0) {
                 resultsCount.textContent = `Found ${count} result(s)`;
@@ -887,6 +1140,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (chevron) {
             chevron.classList.toggle('expanded', expandedDocs.has(docId));
         }
+
+        // Save state after expansion changes
+        saveExplainerState();
     }
 
     function toggleDocumentSelection(docId, selected) {
@@ -913,6 +1169,8 @@ document.addEventListener('DOMContentLoaded', function () {
         } else {
             row.classList.remove('selected');
         }
+        // Save state after selection changes
+        saveExplainerState();
     }
 
     function updateDocCheckboxState(docId) {
@@ -968,8 +1226,9 @@ document.addEventListener('DOMContentLoaded', function () {
         const previewContent = document.getElementById('preview-content');
 
         if (activePreviewId === sectionId) {
-            // Close preview
+            // Close preview (this will reset previewLoadingInProgress)
             closePreviewPanel();
+            return; // Exit early after closing
         } else {
             // Open/switch preview
             activePreviewId = sectionId;
@@ -994,6 +1253,9 @@ document.addEventListener('DOMContentLoaded', function () {
             updatePreviewActiveState();
 
             // Fetch LLM summary
+            previewLoadingInProgress = true; // Mark preview as loading
+            saveExplainerState(); // Save state immediately
+
             try {
                 const response = await fetch('/api/gdd/explainer/preview', {
                     method: 'POST',
@@ -1003,7 +1265,8 @@ document.addEventListener('DOMContentLoaded', function () {
                         section_heading: sectionHeading,
                         doc_name: docName,
                         language: selectedLanguage
-                    })
+                    }),
+                    keepalive: true // Allow request to complete even after page navigation
                 });
 
                 const result = await response.json();
@@ -1014,11 +1277,20 @@ document.addEventListener('DOMContentLoaded', function () {
                 } else {
                     previewContent.innerHTML = `<p class="placeholder-text" style="color: var(--status-error);">Error: ${result.error || 'Failed to generate summary'}</p>`;
                 }
+
+                previewLoadingInProgress = false; // Mark preview as complete
+                // Save state after preview content is loaded
+                saveExplainerState();
             } catch (error) {
                 console.error('Error fetching preview:', error);
                 previewContent.innerHTML = `<p class="placeholder-text" style="color: var(--status-error);">Error: ${error.message}</p>`;
+                previewLoadingInProgress = false; // Mark preview as failed/complete
+                saveExplainerState(); // Save state even on error
             }
         }
+
+        // Save state when preview is opened/closed
+        saveExplainerState();
     }
 
     function closePreviewPanel() {
@@ -1026,6 +1298,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const explainerRight = document.querySelector('.explainer-right');
 
         activePreviewId = null;
+        previewLoadingInProgress = false; // Reset preview loading flag when closing
 
         if (previewPanel) {
             previewPanel.classList.add('hidden');
@@ -1035,6 +1308,9 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         updatePreviewActiveState();
+
+        // Save state when preview is closed
+        saveExplainerState();
     }
 
     function updatePreviewActiveState() {
@@ -1212,6 +1488,10 @@ document.addEventListener('DOMContentLoaded', function () {
         const genStatus = document.getElementById('gen-status');
 
         try {
+            generationInProgress = true; // Mark generation as in progress
+            console.log('[Explainer] Starting generation, setting generationInProgress = true');
+            saveExplainerState(); // Save state immediately
+
             explainBtn.disabled = true;
             genStatus.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--status-info)"><div class="spinner" style="width:12px;height:12px;"></div> Thinking...</div>';
             // Restore flex centering for placeholder state
@@ -1278,7 +1558,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     selected_choices: selectedChoices,
                     stored_results: storedResults,
                     language: selectedLanguage
-                })
+                }),
+                keepalive: true // Allow request to complete even after page navigation
             });
 
             const result = await response.json();
@@ -1314,6 +1595,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 currentCitations = {};
             }
 
+            // Mark generation as complete
+            generationInProgress = false;
+
+            // Save state after explanation is generated
+            saveExplainerState();
+
             // Add click handlers to citation markers (use setTimeout to ensure DOM is ready)
             setTimeout(() => {
                 setupCitationClickHandlers();
@@ -1343,6 +1630,9 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
         } catch (error) {
+            generationInProgress = false; // Mark generation as failed/complete
+            saveExplainerState(); // Save state even on error
+
             genStatus.textContent = "Network Error";
             genStatus.style.color = "var(--status-error)";
             explanationOutput.style.display = 'block';
@@ -2045,6 +2335,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 updateDocCheckboxState(docId);
             }
         });
+
+        // Save state after filter changes
+        saveExplainerState();
     }
 });
 
