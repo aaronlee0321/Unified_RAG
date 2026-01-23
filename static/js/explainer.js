@@ -1,14 +1,12 @@
-// Document Explainer functionality (Tab 2)
-// Exact replication of keyword_extractor Gradio app behavior using vanilla JS
+// Document Explainer functionality - Keyword Finder tab
 
-document.addEventListener('DOMContentLoaded', function() {
-    // Only initialize if we're on the Explainer page
-    // Check for unique explainer elements instead of a tab-specific ID
+document.addEventListener('DOMContentLoaded', function () {
+    // Early exit if not on the Keyword Finder page
     const explainerKeyword = document.getElementById('explainer-keyword');
     if (!explainerKeyword) {
         return;
     }
-    
+
     // Document Explainer elements
     const explainerSearchBtn = document.getElementById('explainer-search-btn');
     const explainerResultsContainer = document.getElementById('explainer-results-container');
@@ -16,21 +14,28 @@ document.addEventListener('DOMContentLoaded', function() {
     const resultsCount = document.getElementById('results-count');
     const selectAllCheckbox = document.getElementById('select-all-checkbox');
     const selectNoneCheckbox = document.getElementById('select-none-checkbox');
+    const queryCheckboxEn = document.getElementById('query-checkbox-en');
+    const queryCheckboxVn = document.getElementById('query-checkbox-vn');
+    const queryLabelEn = document.getElementById('query-label-en');
+    const queryLabelVn = document.getElementById('query-label-vn');
+    const queryFilterContainer = document.getElementById('query-filter-container');
     const explainBtn = document.getElementById('explain-btn');
     const explanationOutput = document.getElementById('explanation-output');
     const languageToggle = document.getElementById('language-toggle');
-    
+
     // State management (replaces Gradio State)
     let storedResults = []; // Replaces explainer_search_results_store
     let lastSearchKeyword = null; // Replaces last_search_keyword
     let deepSearchContext = null; // Track deep search: { originalKeyword, selectedKeyword }
     let selectedLanguage = 'en'; // Language preference: 'en' or 'vn'
-    
+    let translationInfo = null; // Store translation info from search: { original, translation }
+    let currentCitations = {}; // Store citations map from explanation response: { citation_number: { doc_id, doc_name, section_heading, chunk_id } }
+
     // Hierarchical view state
     let expandedDocs = new Set(); // Track which documents are expanded
     let activePreviewId = null; // Track which section is being previewed
     let groupedResults = {}; // { docName: [{ choice, storeItem, index }] }
-    
+
     // Alias management state
     const aliasState = {
         keywords: [],
@@ -42,7 +47,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Event handlers
     explainerSearchBtn.addEventListener('click', searchForExplainer);
-    explainerKeyword.addEventListener('keypress', function(e) {
+    explainerKeyword.addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
             searchForExplainer();
         }
@@ -51,7 +56,15 @@ document.addEventListener('DOMContentLoaded', function() {
     selectAllCheckbox.addEventListener('change', handleSelectAll);
     selectNoneCheckbox.addEventListener('change', handleSelectNone);
     explainBtn.addEventListener('click', generateExplanation);
-    
+
+    // Query filter event listeners
+    if (queryCheckboxEn) {
+        queryCheckboxEn.addEventListener('change', applyQueryFilter);
+    }
+    if (queryCheckboxVn) {
+        queryCheckboxVn.addEventListener('change', applyQueryFilter);
+    }
+
     // Collapsible Logic
     const selectionHeader = document.getElementById('selection-header');
     const selectionContent = document.getElementById('selection-content');
@@ -60,11 +73,11 @@ document.addEventListener('DOMContentLoaded', function() {
     selectionHeader?.addEventListener('click', () => {
         selectionContent.classList.toggle('collapsed');
         if (chevron) {
-            chevron.style.transform = selectionContent.classList.contains('collapsed') 
+            chevron.style.transform = selectionContent.classList.contains('collapsed')
                 ? 'rotate(-90deg)' : 'rotate(0deg)';
         }
     });
-    
+
     // Manage Aliases UI elements
     const openAliasesBtn = document.getElementById('open-aliases-btn');
     const closeAliasesBtn = document.getElementById('close-aliases-btn');
@@ -87,14 +100,14 @@ document.addEventListener('DOMContentLoaded', function() {
         loadAliases();
     });
     if (closeAliasesBtn) closeAliasesBtn.addEventListener('click', () => aliasesDrawer.classList.remove('open'));
-    
+
     // Prevent clicks inside the drawer from propagating (e.g., collapsing sidebar)
     if (aliasesDrawer) {
         aliasesDrawer.addEventListener('click', (e) => {
             e.stopPropagation();
         });
     }
-    
+
     // Close drawer when clicking outside
     document.addEventListener('click', (e) => {
         // Only attempt to close if drawer is open
@@ -103,7 +116,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const isInsideDrawer = aliasesDrawer.contains(e.target);
             const isButton = openAliasesBtn && openAliasesBtn.contains(e.target);
             const isModal = addAliasKeywordDialog && addAliasKeywordDialog.contains(e.target);
-            
+
             if (!isInsideDrawer && !isButton && !isModal) {
                 aliasesDrawer.classList.remove('open');
             }
@@ -122,7 +135,7 @@ document.addEventListener('DOMContentLoaded', function() {
         addAliasKeywordDialog.querySelector('.close-dialog-btn').onclick = () => addAliasKeywordDialog.classList.add('hidden');
         addAliasKeywordDialog.onclick = (e) => { if (e.target === addAliasKeywordDialog) addAliasKeywordDialog.classList.add('hidden'); };
     }
-    
+
     aliasLangFilterBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             aliasLangFilterBtns.forEach(b => b.classList.remove('active'));
@@ -145,13 +158,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Language toggle handler
     if (languageToggle) {
-        languageToggle.addEventListener('change', function() {
+        languageToggle.addEventListener('change', function () {
             selectedLanguage = this.checked ? 'vn' : 'en';
-            console.log('Language changed to:', selectedLanguage);
             // Store in sessionStorage for persistence
             sessionStorage.setItem('explainer_language', selectedLanguage);
         });
-        
+
         // Load saved language preference
         const savedLanguage = sessionStorage.getItem('explainer_language');
         if (savedLanguage) {
@@ -162,7 +174,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize button state
     updateGenerateButtonState();
-    
+
     // Initialize empty state - show results container with count 0
     const resultsCountNumber = document.getElementById('results-count-number');
     const selectedCountBadge = document.getElementById('selected-count-badge');
@@ -171,24 +183,29 @@ document.addEventListener('DOMContentLoaded', function() {
     explainerResultsContainer.style.display = 'flex';
     const emptyLeft = document.getElementById('explainer-empty-left');
     if (emptyLeft) emptyLeft.style.display = 'none';
-    
+
     // Helper function to display progress messages sequentially
     function displayProgressMessages(messages, container) {
         if (!messages || messages.length === 0) return;
-        
+
         // Show the last progress message with spinner and animation
         const lastMessage = messages[messages.length - 1];
         container.innerHTML = `<div class="progress-message" style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;"></div> <span>${lastMessage}</span></div>`;
     }
-    
+
     // --- SEARCH LOGIC WITH ALIASES ---
     async function searchForExplainer() {
         const keyword = explainerKeyword.value.trim();
         const emptyLeft = document.getElementById('explainer-empty-left');
         const resultsCountNumber = document.getElementById('results-count-number');
         const selectedCountBadge = document.getElementById('selected-count-badge');
-        
+
         if (!keyword) {
+            // Hide query filter container when keyword is empty
+            if (queryFilterContainer) {
+                queryFilterContainer.style.display = 'none';
+            }
+
             // Always show results container, even when empty
             explainerResultsContainer.style.display = 'flex';
             if (emptyLeft) emptyLeft.style.display = 'none';
@@ -200,22 +217,38 @@ document.addEventListener('DOMContentLoaded', function() {
             updateGenerateButtonState();
             return;
         }
-        
+
         try {
             explainerSearchBtn.disabled = true;
             resultsCount.style.display = 'block';
             resultsCount.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;"></div> <span>Searching...</span></div>';
-            
+
+            // Reset translation info for new search
+            translationInfo = null;
+
+            // Hide query filter container at start of new search
+            if (queryFilterContainer) {
+                queryFilterContainer.style.display = 'none';
+            }
+
+            // Reset query labels to defaults
+            if (queryLabelEn) queryLabelEn.textContent = 'Query';
+            if (queryLabelVn) queryLabelVn.textContent = 'VN';
+            if (queryCheckboxVn) {
+                queryCheckboxVn.disabled = false;
+                queryCheckboxVn.checked = true;
+            }
+            if (queryCheckboxEn) queryCheckboxEn.checked = true;
+
             // Check for aliases first
             let searchKeywords = [keyword];
             await loadAliases(); // Ensure keywords are loaded
-            
-            const foundAliasKW = aliasState.keywords.find(kw => 
+
+            const foundAliasKW = aliasState.keywords.find(kw =>
                 kw.aliases.some(a => a.name.toLowerCase() === keyword.toLowerCase())
             );
-            
+
             if (foundAliasKW) {
-                console.log(`Found alias for "${keyword}" -> Primary keyword: "${foundAliasKW.name}"`);
                 searchKeywords.push(foundAliasKW.name);
             }
 
@@ -225,13 +258,36 @@ document.addEventListener('DOMContentLoaded', function() {
             let mergedKeys = new Set();
 
             for (const kw of searchKeywords) {
-            const response = await fetch('/api/gdd/explainer/search', {
-                method: 'POST',
+                const response = await fetch('/api/gdd/explainer/search', {
+                    method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ keyword: kw })
                 });
-            const result = await response.json();
-            
+                const result = await response.json();
+
+                // Capture translation_info from the original keyword search (first in loop)
+                if (result.translation_info && !translationInfo && kw === keyword) {
+                    translationInfo = result.translation_info;
+
+                    // Update labels immediately after capturing translation info
+                    if (translationInfo.original) {
+                        queryLabelEn.textContent = translationInfo.original;
+                    }
+                    if (translationInfo.translation) {
+                        queryLabelVn.textContent = translationInfo.translation;
+                        queryCheckboxVn.disabled = false;
+                    } else {
+                        queryLabelVn.textContent = 'VN';
+                        queryCheckboxVn.disabled = true;
+                        queryCheckboxVn.checked = false;
+                    }
+
+                    // Show query filter container after translation info is captured
+                    if (queryFilterContainer && translationInfo.original) {
+                        queryFilterContainer.style.display = 'flex';
+                    }
+                }
+
                 if (result.success && result.choices) {
                     result.choices.forEach((choice, idx) => {
                         const storeItem = result.store_data[idx];
@@ -240,12 +296,28 @@ document.addEventListener('DOMContentLoaded', function() {
                             mergedKeys.add(key);
                             allChoices.push(choice);
                             allStoreData.push(storeItem);
+                        } else {
+                            // Merge matching keywords for existing results
+                            const existingItem = allStoreData.find(item => `${item.doc_id}:${item.section_heading}` === key);
+                            if (existingItem && storeItem._matching_keywords) {
+                                if (!existingItem._matching_keywords) existingItem._matching_keywords = [];
+                                storeItem._matching_keywords.forEach(mk => {
+                                    if (!existingItem._matching_keywords.includes(mk)) {
+                                        existingItem._matching_keywords.push(mk);
+                                    }
+                                });
+                            }
                         }
                     });
                 }
             }
 
             if (allChoices.length === 0) {
+                // Hide query filter container when no results
+                if (queryFilterContainer) {
+                    queryFilterContainer.style.display = 'none';
+                }
+
                 // Show "No results" with "Search Deeper?" option
                 resultsCount.innerHTML = `
                     <div style="display: flex; align-items: center; gap: 12px;">
@@ -261,7 +333,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderCheckboxes([]);
                 if (resultsCountNumber) resultsCountNumber.textContent = '0';
                 if (selectedCountBadge) selectedCountBadge.textContent = '0';
-                
+
                 // Attach deep search handler
                 const deepSearchBtn = document.getElementById('deep-search-btn');
                 if (deepSearchBtn) {
@@ -269,24 +341,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 return;
             }
-            
+
             storedResults = allStoreData;
             lastSearchKeyword = keyword;
-            
+
             // Always show results container
             explainerResultsContainer.style.display = 'flex';
             if (emptyLeft) emptyLeft.style.display = 'none';
-            
+
             // Update count display
             const count = allChoices.length;
             if (resultsCountNumber) resultsCountNumber.textContent = count.toString();
-            
+
             renderCheckboxes(allChoices);
-            
+
+            // Apply query filter after rendering
+            applyQueryFilter();
+
             if (count > 0) {
                 resultsCount.textContent = `Found ${count} result(s)`;
                 resultsCount.style.color = "var(--muted-foreground)";
-                
+
                 // Show alias prompt if this was from deep search
                 if (deepSearchContext && deepSearchContext.originalKeyword && deepSearchContext.selectedKeyword) {
                     // Delay slightly to let UI settle
@@ -300,7 +375,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 resultsCount.style.color = "var(--muted-foreground)";
                 deepSearchContext = null; // Clear if no results
             }
-            
+
         } catch (error) {
             resultsCount.textContent = "Error: " + error.message;
             resultsCount.style.color = "var(--status-error)";
@@ -314,59 +389,55 @@ document.addEventListener('DOMContentLoaded', function() {
             updateGenerateButtonState();
         }
     }
-    
+
     // Deep search functionality
     async function performDeepSearch(originalKeyword) {
         try {
             explainerSearchBtn.disabled = true;
             resultsCount.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><div class="spinner" style="width:14px;height:14px;"></div> <span>Searching deeper with AI...</span></div>';
-            
+
             const response = await fetch('/api/gdd/explainer/deep-search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ keyword: originalKeyword })
             });
-            
+
             const deepResult = await response.json();
-            
+
             // Display progress messages if available
             if (deepResult.progress_messages && deepResult.progress_messages.length > 0) {
                 displayProgressMessages(deepResult.progress_messages, resultsCount);
             }
-            
-            // Update message if retry was performed
-            if (deepResult.retry_performed) {
-                console.log('Not found, retrying with different keywords...');
-            }
-            
+
+
             if (deepResult.error) {
                 resultsCount.textContent = `Error: ${deepResult.error}`;
                 resultsCount.style.color = "var(--status-error)";
                 return;
             }
-            
+
             const matchedKeywords = deepResult.matched_keywords || [];
-            
+
             if (matchedKeywords.length === 0) {
                 resultsCount.textContent = "No matches found even with deep search. Try a different keyword.";
                 resultsCount.style.color = "var(--muted-foreground)";
                 return;
             }
-            
+
             // Show modal for user to select keyword
             const selectedKeyword = await showKeywordSelectionModal(matchedKeywords, originalKeyword);
-            
+
             if (selectedKeyword) {
                 // Store deep search context for alias prompt
                 deepSearchContext = {
                     originalKeyword: originalKeyword,
                     selectedKeyword: selectedKeyword
                 };
-                
+
                 // Perform normal search with selected keyword
                 explainerKeyword.value = selectedKeyword;
                 await searchForExplainer();
-                
+
                 // After search completes, show alias prompt if results were found
                 // This will be handled in searchForExplainer after results are displayed
             } else {
@@ -374,7 +445,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 resultsCount.textContent = "Search cancelled.";
                 resultsCount.style.color = "var(--muted-foreground)";
             }
-            
+
         } catch (error) {
             resultsCount.textContent = "Error in deep search: " + error.message;
             resultsCount.style.color = "var(--status-error)";
@@ -382,13 +453,13 @@ document.addEventListener('DOMContentLoaded', function() {
             explainerSearchBtn.disabled = false;
         }
     }
-    
+
     function showKeywordSelectionModal(keywords, originalKeyword) {
         return new Promise((resolve) => {
             const modal = document.createElement('div');
             modal.className = 'modal';
             modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;';
-            
+
             modal.innerHTML = `
                 <div class="modal-content" style="background: white; padding: 24px; border-radius: 8px; max-width: 500px; width: 90%; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
                     <h3 style="font-size: 1rem; font-weight: 600; margin: 0 0 12px 0;">Did you mean one of these?</h3>
@@ -407,9 +478,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                 </div>
             `;
-            
+
             document.body.appendChild(modal);
-            
+
             // Add hover effects
             const style = document.createElement('style');
             style.textContent = `
@@ -420,45 +491,44 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             `;
             document.head.appendChild(style);
-            
-            modal.querySelectorAll('.keyword-option-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const keyword = btn.dataset.keyword;
-                    document.body.removeChild(modal);
-                    document.head.removeChild(style);
-                    resolve(keyword);
-                });
-            });
-            
-            modal.querySelector('.cancel-btn').addEventListener('click', () => {
+
+            const closeModal = (result) => {
                 document.body.removeChild(modal);
                 document.head.removeChild(style);
-                resolve(null);
+                resolve(result);
+            };
+
+            modal.querySelectorAll('.keyword-option-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    closeModal(btn.dataset.keyword);
+                });
             });
-            
+
+            modal.querySelector('.cancel-btn').addEventListener('click', () => {
+                closeModal(null);
+            });
+
             // Close on backdrop click
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) {
-                    document.body.removeChild(modal);
-                    document.head.removeChild(style);
-                    resolve(null);
+                    closeModal(null);
                 }
             });
         });
     }
-    
+
     // Show add alias prompt after deep search
     function showAddAliasPrompt(originalKeyword, selectedKeyword) {
         // Create a popup card on the right side (in explanation area)
         const explanationOutput = document.getElementById('explanation-output');
         if (!explanationOutput) return;
-        
+
         // Check if there's already a prompt
         const existingPrompt = document.getElementById('add-alias-prompt');
         if (existingPrompt) {
             existingPrompt.remove();
         }
-        
+
         // Create prompt card
         const promptCard = document.createElement('div');
         promptCard.id = 'add-alias-prompt';
@@ -474,7 +544,7 @@ document.addEventListener('DOMContentLoaded', function() {
             max-width: 320px;
             z-index: 100;
         `;
-        
+
         promptCard.innerHTML = `
             <div style="display: flex; align-items: flex-start; gap: 12px;">
                 <div style="flex: 1;">
@@ -498,7 +568,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 </button>
             </div>
         `;
-        
+
         // Position relative to explanation bubble (right side panel)
         const explanationBubble = explanationOutput.closest('.explainer-bubble');
         if (explanationBubble) {
@@ -514,12 +584,12 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             explanationOutput.appendChild(promptCard);
         }
-        
+
         // Add event listeners
         const confirmBtn = promptCard.querySelector('#confirm-add-alias-btn');
         const dismissBtn = promptCard.querySelector('#dismiss-alias-prompt-btn');
         const closeBtn = promptCard.querySelector('#close-alias-prompt-btn');
-        
+
         const removePrompt = () => {
             promptCard.style.opacity = '0';
             promptCard.style.transition = 'opacity 0.2s';
@@ -529,11 +599,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }, 200);
         };
-        
+
         confirmBtn.addEventListener('click', async () => {
             confirmBtn.disabled = true;
             confirmBtn.textContent = 'Adding...';
-            
+
             try {
                 // Use parent keyword's language instead of detecting from alias name
                 // Find the selected keyword in the keywords list to get its language
@@ -547,7 +617,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         language = 'en';
                     }
                 }
-                
+
                 const response = await fetch('/api/manage/aliases', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -557,7 +627,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         language: language
                     })
                 });
-                
+
                 if (response.ok) {
                     confirmBtn.textContent = '✓ Added!';
                     confirmBtn.style.background = 'var(--status-success)';
@@ -574,203 +644,217 @@ document.addEventListener('DOMContentLoaded', function() {
                 confirmBtn.textContent = 'Yes, Add';
             }
         });
-        
+
         dismissBtn.addEventListener('click', removePrompt);
         closeBtn.addEventListener('click', removePrompt);
     }
-    
-    function renderCheckboxes(choices) {
-        explainerResultsCheckboxes.innerHTML = '';
-        groupedResults = {};
-        
-        if (!choices || choices.length === 0) {
-            expandedDocs.clear();
-            activePreviewId = null;
-            closePreviewPanel();
-            return;
-        }
-        
-        // Group choices by document name
-        // Choice format from API: "DocName → SectionHeading"
+
+    function groupChoicesByDocument(choices) {
+        const grouped = {};
         choices.forEach((choice, index) => {
             const storeItem = storedResults[index];
-            
-            // Parse choice string: "DocName → SectionHeading"
             const parts = choice.split(' → ');
             const docName = parts[0] || 'Unknown Document';
             const sectionTitle = parts.length > 1 ? parts.slice(1).join(' → ') : choice;
-            
-            if (!groupedResults[docName]) {
-                groupedResults[docName] = [];
+
+            if (!grouped[docName]) {
+                grouped[docName] = [];
             }
-            groupedResults[docName].push({
+            grouped[docName].push({
                 choice: choice,
                 storeItem: storeItem,
                 index: index,
                 sectionTitle: sectionTitle
             });
         });
-        
+        return grouped;
+    }
+
+    function sortSectionsByChunkId(sections) {
+        return sections.sort((sectionA, sectionB) => {
+            const chunkIdA = sectionA.storeItem?.chunk_id || '';
+            const chunkIdB = sectionB.storeItem?.chunk_id || '';
+            return chunkIdA.localeCompare(chunkIdB, undefined, { numeric: true, sensitivity: 'base' });
+        });
+    }
+
+    function createDocumentHeader(docName, docId, sections) {
+        const docHeader = document.createElement('div');
+        docHeader.className = 'doc-row-header';
+
+        const chevron = document.createElement('img');
+        chevron.src = '/static/icons/chevron-right.svg';
+        chevron.className = `doc-row-chevron ${expandedDocs.has(docId) ? 'expanded' : ''}`;
+        chevron.onclick = (e) => {
+            e.stopPropagation();
+            toggleDocExpanded(docId);
+        };
+
+        const docCheckbox = document.createElement('input');
+        docCheckbox.type = 'checkbox';
+        docCheckbox.className = 'doc-row-checkbox';
+        docCheckbox.id = `doc-checkbox-${docId}`;
+        docCheckbox.onclick = (e) => {
+            e.stopPropagation();
+            toggleDocumentSelection(docId, docCheckbox.checked);
+        };
+
+        const fileIcon = document.createElement('img');
+        fileIcon.src = '/static/icons/file.svg';
+        fileIcon.className = 'doc-row-icon';
+
+        const docNameSpan = document.createElement('span');
+        docNameSpan.className = 'doc-row-name';
+        docNameSpan.textContent = formatDocName(docName);
+        docNameSpan.title = docName;
+
+        const countSpan = document.createElement('span');
+        countSpan.className = 'doc-row-count';
+        countSpan.id = `doc-count-${docId}`;
+        countSpan.textContent = `(0/${sections.length})`;
+
+        docHeader.appendChild(chevron);
+        docHeader.appendChild(docCheckbox);
+        docHeader.appendChild(fileIcon);
+        docHeader.appendChild(docNameSpan);
+        docHeader.appendChild(countSpan);
+        docHeader.onclick = () => toggleDocExpanded(docId);
+
+        return docHeader;
+    }
+
+    function createSectionRow(item, docName, docId) {
+        const sectionId = `section-${item.index}`;
+        const sectionRow = document.createElement('div');
+        sectionRow.className = 'section-row';
+        sectionRow.dataset.sectionId = sectionId;
+        sectionRow.dataset.docId = docId;
+        sectionRow.dataset.index = item.index;
+
+        if (activePreviewId === sectionId) {
+            sectionRow.classList.add('preview-active');
+        }
+
+        const sectionCheckbox = document.createElement('input');
+        sectionCheckbox.type = 'checkbox';
+        sectionCheckbox.className = 'section-row-checkbox';
+        sectionCheckbox.id = `checkbox-${item.index}`;
+        sectionCheckbox.value = item.choice;
+        sectionCheckbox.name = 'explainer-choice';
+        sectionCheckbox.onclick = (e) => {
+            e.stopPropagation();
+            updateSectionSelection(sectionRow, sectionCheckbox.checked);
+            updateDocCheckboxState(docId);
+            updateGenerateButtonState();
+            updateSelectAllNoneState();
+        };
+
+        const sectionTitle = document.createElement('span');
+        sectionTitle.className = 'section-row-title';
+        sectionTitle.textContent = item.sectionTitle;
+        sectionTitle.title = item.choice;
+
+        const previewBtn = document.createElement('button');
+        previewBtn.className = `preview-btn ${activePreviewId === sectionId ? 'active' : ''}`;
+        previewBtn.innerHTML = `
+            <img src="/static/icons/eye.svg" width="12" height="12">
+            <span>Preview</span>
+        `;
+        previewBtn.onclick = (e) => {
+            e.stopPropagation();
+            const previewDocName = item.storeItem?.doc_name || docName;
+            const docId = item.storeItem?.doc_id || '';
+            const sectionHeading = item.storeItem?.section_heading || item.sectionTitle;
+            const previewContent = item.storeItem?.content || '';
+            togglePreview(sectionId, previewDocName, item.sectionTitle, previewContent, docId, sectionHeading);
+        };
+
+        sectionRow.appendChild(sectionCheckbox);
+        sectionRow.appendChild(sectionTitle);
+        sectionRow.appendChild(previewBtn);
+
+        sectionRow.onclick = () => {
+            sectionCheckbox.checked = !sectionCheckbox.checked;
+            updateSectionSelection(sectionRow, sectionCheckbox.checked);
+            updateDocCheckboxState(docId);
+            updateGenerateButtonState();
+            updateSelectAllNoneState();
+        };
+
+        return sectionRow;
+    }
+
+    function renderCheckboxes(choices) {
+        explainerResultsCheckboxes.innerHTML = '';
+        groupedResults = {};
+
+        // Update query variant labels with actual keywords
+        if (translationInfo) {
+            // Always use original keyword for EN label
+            if (translationInfo.original) {
+                queryLabelEn.textContent = translationInfo.original;
+            } else if (lastSearchKeyword) {
+                queryLabelEn.textContent = lastSearchKeyword;
+            }
+
+            // Use translation for VN label if available
+            if (translationInfo.translation) {
+                queryLabelVn.textContent = translationInfo.translation;
+                queryCheckboxVn.disabled = false;
+            } else {
+                // No translation available - disable VN checkbox
+                queryLabelVn.textContent = 'VN';
+                queryCheckboxVn.disabled = true;
+                queryCheckboxVn.checked = false;
+            }
+        } else if (lastSearchKeyword) {
+            // Fallback: use lastSearchKeyword if translationInfo not available
+            queryLabelEn.textContent = lastSearchKeyword;
+            queryLabelVn.textContent = 'VN';
+            queryCheckboxVn.disabled = true;
+            queryCheckboxVn.checked = false;
+        }
+
+        if (!choices || choices.length === 0) {
+            expandedDocs.clear();
+            activePreviewId = null;
+            closePreviewPanel();
+            return;
+        }
+
+        groupedResults = groupChoicesByDocument(choices);
+
         // Render hierarchical structure
         Object.keys(groupedResults).forEach(docName => {
-            const sections = groupedResults[docName];
-            
-            // Debug: Log chunk_ids before sorting
-            console.log(`[DEBUG] Document: ${docName}, sections count: ${sections.length}`);
-            sections.forEach((s, idx) => {
-                console.log(`  [${idx}] chunk_id: "${s.storeItem?.chunk_id || 'MISSING'}", section: ${s.storeItem?.section_heading}`);
-            });
-            
-            // Sort sections by chunk_id with natural/numeric sorting (e.g., _1, _2, ..., _9, _10, _11)
-            sections.sort((sectionA, sectionB) => {
-                const chunkIdA = sectionA.storeItem?.chunk_id || '';
-                const chunkIdB = sectionB.storeItem?.chunk_id || '';
-                return chunkIdA.localeCompare(chunkIdB, undefined, { numeric: true, sensitivity: 'base' });
-            });
-            
-            // Debug: Log chunk_ids after sorting
-            console.log(`[DEBUG] After sorting:`);
-            sections.forEach((s, idx) => {
-                console.log(`  [${idx}] chunk_id: "${s.storeItem?.chunk_id || 'MISSING'}", section: ${s.storeItem?.section_heading}`);
-            });
-            
+            const sections = sortSectionsByChunkId(groupedResults[docName]);
             const docId = `doc-${hashString(docName)}`;
-            
-            // Document row
+
             const docRow = document.createElement('div');
             docRow.className = 'doc-row';
             docRow.dataset.docId = docId;
-            
-            // Document header
-            const docHeader = document.createElement('div');
-            docHeader.className = 'doc-row-header';
-            
-            // Chevron
-            const chevron = document.createElement('img');
-            chevron.src = '/static/icons/chevron-right.svg';
-            chevron.className = `doc-row-chevron ${expandedDocs.has(docId) ? 'expanded' : ''}`;
-            chevron.onclick = (e) => {
-                e.stopPropagation();
-                toggleDocExpanded(docId);
-            };
-            
-            // Document checkbox
-            const docCheckbox = document.createElement('input');
-            docCheckbox.type = 'checkbox';
-            docCheckbox.className = 'doc-row-checkbox';
-            docCheckbox.id = `doc-checkbox-${docId}`;
-            docCheckbox.onclick = (e) => {
-                e.stopPropagation();
-                toggleDocumentSelection(docId, docCheckbox.checked);
-            };
-            
-            // File icon
-            const fileIcon = document.createElement('img');
-            fileIcon.src = '/static/icons/file.svg';
-            fileIcon.className = 'doc-row-icon';
-            
-            // Document name
-            const docNameSpan = document.createElement('span');
-            docNameSpan.className = 'doc-row-name';
-            docNameSpan.textContent = formatDocName(docName);
-            docNameSpan.title = docName;
-            
-            // Selection count
-            const countSpan = document.createElement('span');
-            countSpan.className = 'doc-row-count';
-            countSpan.id = `doc-count-${docId}`;
-            countSpan.textContent = `(0/${sections.length})`;
-            
-            docHeader.appendChild(chevron);
-            docHeader.appendChild(docCheckbox);
-            docHeader.appendChild(fileIcon);
-            docHeader.appendChild(docNameSpan);
-            docHeader.appendChild(countSpan);
-            
-            // Click on header row to toggle expand
-            docHeader.onclick = () => toggleDocExpanded(docId);
-            
+
+            const docHeader = createDocumentHeader(docName, docId, sections);
             docRow.appendChild(docHeader);
-            
-            // Sections container
+
             const sectionsContainer = document.createElement('div');
             sectionsContainer.className = `doc-sections ${expandedDocs.has(docId) ? 'expanded' : ''}`;
             sectionsContainer.id = `sections-${docId}`;
-            
-            sections.forEach((item, sectionIdx) => {
-                const sectionId = `section-${item.index}`;
-                
-                const sectionRow = document.createElement('div');
-                sectionRow.className = 'section-row';
-                sectionRow.dataset.sectionId = sectionId;
-                sectionRow.dataset.docId = docId;
-                sectionRow.dataset.index = item.index;
-                
-                if (activePreviewId === sectionId) {
-                    sectionRow.classList.add('preview-active');
-                }
-                
-                // Section checkbox
-                const sectionCheckbox = document.createElement('input');
-                sectionCheckbox.type = 'checkbox';
-                sectionCheckbox.className = 'section-row-checkbox';
-                sectionCheckbox.id = `checkbox-${item.index}`;
-                sectionCheckbox.value = item.choice;
-                sectionCheckbox.name = 'explainer-choice';
-                sectionCheckbox.onclick = (e) => {
-                    e.stopPropagation();
-                    updateSectionSelection(sectionRow, sectionCheckbox.checked);
-                    updateDocCheckboxState(docId);
-                updateGenerateButtonState();
-                updateSelectAllNoneState();
-                };
-                
-                // Section title
-                const sectionTitle = document.createElement('span');
-                sectionTitle.className = 'section-row-title';
-                sectionTitle.textContent = item.sectionTitle;
-                sectionTitle.title = item.choice;
-                
-                // Preview button
-                const previewBtn = document.createElement('button');
-                previewBtn.className = `preview-btn ${activePreviewId === sectionId ? 'active' : ''}`;
-                previewBtn.innerHTML = `
-                    <img src="/static/icons/eye.svg" width="12" height="12">
-                    <span>Preview</span>
-                `;
-                previewBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    // Get doc_id and section_heading from store item
-                    const previewDocName = item.storeItem?.doc_name || docName;
-                    const docId = item.storeItem?.doc_id || '';
-                    const sectionHeading = item.storeItem?.section_heading || item.sectionTitle;
-                    const previewContent = item.storeItem?.content || ''; // Fallback, but won't be used
-                    togglePreview(sectionId, previewDocName, item.sectionTitle, previewContent, docId, sectionHeading);
-                };
-                
-                sectionRow.appendChild(sectionCheckbox);
-                sectionRow.appendChild(sectionTitle);
-                sectionRow.appendChild(previewBtn);
-                
-                // Click on row to toggle checkbox
-                sectionRow.onclick = () => {
-                    sectionCheckbox.checked = !sectionCheckbox.checked;
-                    updateSectionSelection(sectionRow, sectionCheckbox.checked);
-                    updateDocCheckboxState(docId);
-                    updateGenerateButtonState();
-                    updateSelectAllNoneState();
-                };
-                
+
+            sections.forEach(item => {
+                const sectionRow = createSectionRow(item, docName, docId);
                 sectionsContainer.appendChild(sectionRow);
             });
-            
+
             docRow.appendChild(sectionsContainer);
             explainerResultsCheckboxes.appendChild(docRow);
         });
-        
+
         // Reset select all/none checkboxes
         selectAllCheckbox.checked = false;
         selectNoneCheckbox.checked = false;
+
+        // Apply query filter after rendering
+        applyQueryFilter();
     }
 
     // Helper functions for hierarchical view
@@ -783,7 +867,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         return Math.abs(hash).toString(36);
     }
-    
+
     function formatDocName(docName) {
         // Truncate long document names for display
         if (docName.length > 40) {
@@ -791,17 +875,17 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         return docName;
     }
-    
+
     function toggleDocExpanded(docId) {
         if (expandedDocs.has(docId)) {
             expandedDocs.delete(docId);
         } else {
             expandedDocs.add(docId);
         }
-        
+
         const sectionsContainer = document.getElementById(`sections-${docId}`);
         const chevron = document.querySelector(`[data-doc-id="${docId}"] .doc-row-chevron`);
-        
+
         if (sectionsContainer) {
             sectionsContainer.classList.toggle('expanded', expandedDocs.has(docId));
         }
@@ -809,11 +893,11 @@ document.addEventListener('DOMContentLoaded', function() {
             chevron.classList.toggle('expanded', expandedDocs.has(docId));
         }
     }
-    
+
     function toggleDocumentSelection(docId, selected) {
         const sectionsContainer = document.getElementById(`sections-${docId}`);
         if (!sectionsContainer) return;
-        
+
         const sectionRows = sectionsContainer.querySelectorAll('.section-row');
         sectionRows.forEach(row => {
             const checkbox = row.querySelector('.section-row-checkbox');
@@ -822,12 +906,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateSectionSelection(row, selected);
             }
         });
-        
+
         updateDocCheckboxState(docId);
         updateGenerateButtonState();
         updateSelectAllNoneState();
     }
-    
+
     function updateSectionSelection(row, selected) {
         if (selected) {
             row.classList.add('selected');
@@ -835,23 +919,37 @@ document.addEventListener('DOMContentLoaded', function() {
             row.classList.remove('selected');
         }
     }
-    
+
     function updateDocCheckboxState(docId) {
         const docCheckbox = document.getElementById(`doc-checkbox-${docId}`);
         const countSpan = document.getElementById(`doc-count-${docId}`);
         const sectionsContainer = document.getElementById(`sections-${docId}`);
-        
-        if (!sectionsContainer || !docCheckbox) return;
-        
+
+        if (!sectionsContainer || !docCheckbox) {
+            return;
+        }
+
         const checkboxes = sectionsContainer.querySelectorAll('.section-row-checkbox');
         const checkedCount = sectionsContainer.querySelectorAll('.section-row-checkbox:checked').length;
-        const totalCount = checkboxes.length;
-        
+
+        // Count only visible sections (not hidden by filter)
+        const sectionRows = sectionsContainer.querySelectorAll('.section-row');
+        let visibleCount = 0;
+        sectionRows.forEach(row => {
+            const inlineStyle = row.style.display;
+            const computedStyle = window.getComputedStyle(row);
+            // Row is visible if inline style is not 'none' AND computed style is not 'none'
+            if (inlineStyle !== 'none' && computedStyle.display !== 'none') {
+                visibleCount++;
+            }
+        });
+        const totalCount = visibleCount > 0 ? visibleCount : checkboxes.length; // Fallback to all if no visible
+
         // Update count display
         if (countSpan) {
             countSpan.textContent = `(${checkedCount}/${totalCount})`;
         }
-        
+
         // Update document checkbox state
         if (checkedCount === 0) {
             docCheckbox.checked = false;
@@ -867,24 +965,24 @@ document.addEventListener('DOMContentLoaded', function() {
             docCheckbox.classList.add('partial');
         }
     }
-    
+
     // Preview functions
     async function togglePreview(sectionId, docName, sectionTitle, content, docId, sectionHeading) {
         const previewPanel = document.getElementById('section-preview-panel');
         const explainerRight = document.querySelector('.explainer-right');
         const previewContent = document.getElementById('preview-content');
-        
+
         if (activePreviewId === sectionId) {
             // Close preview
             closePreviewPanel();
         } else {
             // Open/switch preview
             activePreviewId = sectionId;
-            
+
             // Update preview panel header
             document.getElementById('preview-doc-name').textContent = docName;
             document.getElementById('preview-section-title').textContent = sectionTitle;
-            
+
             // Show loading state (matching v0 style)
             previewContent.innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; gap: 12px;">
@@ -892,14 +990,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     <p style="font-size: 0.875rem; color: var(--muted-foreground); margin: 0;">Generating summary...</p>
                 </div>
             `;
-            
+
             // Show panel
             previewPanel.classList.remove('hidden');
             explainerRight.classList.add('preview-open');
-            
+
             // Update active state in sidebar
             updatePreviewActiveState();
-            
+
             // Fetch LLM summary
             try {
                 const response = await fetch('/api/gdd/explainer/preview', {
@@ -912,9 +1010,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         language: selectedLanguage
                     })
                 });
-                
+
                 const result = await response.json();
-                
+
                 if (result.success && result.summary) {
                     // Format and display the summary (similar to chatbox response)
                     previewContent.innerHTML = formatPreviewContent(result.summary);
@@ -927,23 +1025,23 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     }
-    
+
     function closePreviewPanel() {
         const previewPanel = document.getElementById('section-preview-panel');
         const explainerRight = document.querySelector('.explainer-right');
-        
+
         activePreviewId = null;
-        
+
         if (previewPanel) {
             previewPanel.classList.add('hidden');
         }
         if (explainerRight) {
             explainerRight.classList.remove('preview-open');
         }
-        
+
         updatePreviewActiveState();
     }
-    
+
     function updatePreviewActiveState() {
         // Remove active state from all sections and preview buttons
         document.querySelectorAll('.section-row').forEach(row => {
@@ -951,7 +1049,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const btn = row.querySelector('.preview-btn');
             if (btn) btn.classList.remove('active');
         });
-        
+
         // Add active state to current preview section
         if (activePreviewId) {
             const activeRow = document.querySelector(`[data-section-id="${activePreviewId}"]`);
@@ -962,27 +1060,64 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     }
-    
+
+    function setupCitationClickHandlers() {
+        // Add click handlers to all citation markers in the explanation
+        const citationMarkers = document.querySelectorAll('.citation-marker');
+
+        citationMarkers.forEach((marker) => {
+            marker.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const citationNumber = parseInt(marker.getAttribute('data-citation-number'));
+
+                if (!citationNumber || !currentCitations[citationNumber]) {
+                    return;
+                }
+
+                const citationInfo = currentCitations[citationNumber];
+                const docId = citationInfo.doc_id;
+                const docName = citationInfo.doc_name || docId;
+                const sectionHeading = citationInfo.section_heading || '';
+                const chunkId = citationInfo.chunk_id || '';
+
+                // Create a unique section ID for this citation (using chunk_id if available, otherwise doc_id + section_heading)
+                const sectionId = chunkId || `citation-${docId}-${sectionHeading}`;
+
+                // Check if this is the same chunk already being previewed
+                if (activePreviewId === sectionId) {
+                    // Same chunk, do nothing
+                    return;
+                }
+
+                // Call togglePreview with the citation's chunk info
+                // Note: content is empty since we'll fetch it via the preview API
+                togglePreview(sectionId, docName, sectionHeading || 'No section', '', docId, sectionHeading);
+            });
+        });
+    }
+
     function formatPreviewContent(content) {
         if (!content) return '<p class="placeholder-text">No content available.</p>';
-        
+
         // Format markdown-like content (similar to chatbox response)
         let html = escapeHtml(content);
-        
+
         // Convert markdown bold (**text**)
         html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        
+
         // Convert headers
         html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
         html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
         html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
-        
+
         // Convert line breaks to paragraphs
         const paragraphs = html.split(/\n\n+/).filter(p => p.trim());
         if (paragraphs.length === 0) {
             return `<p>${html}</p>`;
         }
-        
+
         // Wrap each paragraph, but preserve headers
         return paragraphs.map(p => {
             const trimmed = p.trim();
@@ -992,13 +1127,13 @@ document.addEventListener('DOMContentLoaded', function() {
             return `<p>${trimmed}</p>`;
         }).join('');
     }
-    
+
     function escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
-    
+
     // Initialize close preview button
     const closePreviewBtn = document.getElementById('close-preview-btn');
     if (closePreviewBtn) {
@@ -1008,7 +1143,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function handleSelectAll() {
         if (selectAllCheckbox.checked) {
             selectNoneCheckbox.checked = false;
-            
+
             // Select all sections in all documents
             const sectionRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
             sectionRows.forEach(row => {
@@ -1018,13 +1153,31 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateSectionSelection(row, true);
                 }
             });
-            
+
             // Update all document checkboxes
             Object.keys(groupedResults).forEach(docName => {
                 const docId = `doc-${hashString(docName)}`;
                 updateDocCheckboxState(docId);
             });
-            
+
+            updateGenerateButtonState();
+        } else {
+            // When "All" is unchecked, uncheck all sections
+            const sectionRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
+            sectionRows.forEach(row => {
+                const checkbox = row.querySelector('.section-row-checkbox');
+                if (checkbox) {
+                    checkbox.checked = false;
+                    updateSectionSelection(row, false);
+                }
+            });
+
+            // Update all document checkboxes
+            Object.keys(groupedResults).forEach(docName => {
+                const docId = `doc-${hashString(docName)}`;
+                updateDocCheckboxState(docId);
+            });
+
             updateGenerateButtonState();
         }
     }
@@ -1032,7 +1185,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function handleSelectNone() {
         if (selectNoneCheckbox.checked) {
             selectAllCheckbox.checked = false;
-            
+
             // Deselect all sections in all documents
             const sectionRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
             sectionRows.forEach(row => {
@@ -1042,27 +1195,27 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateSectionSelection(row, false);
                 }
             });
-            
+
             // Update all document checkboxes
             Object.keys(groupedResults).forEach(docName => {
                 const docId = `doc-${hashString(docName)}`;
                 updateDocCheckboxState(docId);
             });
-            
+
             updateGenerateButtonState();
         }
     }
-    
+
     function getSelectedChoices() {
         const checkboxes = explainerResultsCheckboxes.querySelectorAll('.section-row-checkbox:checked');
         return Array.from(checkboxes).map(cb => cb.value);
     }
-    
+
     async function generateExplanation() {
         const keyword = explainerKeyword.value.trim();
         const selectedChoices = getSelectedChoices();
         const genStatus = document.getElementById('gen-status');
-        
+
         try {
             explainBtn.disabled = true;
             genStatus.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--status-info)"><div class="spinner" style="width:12px;height:12px;"></div> Thinking...</div>';
@@ -1081,21 +1234,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                 </div>
             `;
-            
+
             // Resolve alias to parent keyword for explanation generation
             // This ensures we use the actual keyword that exists in documents, not the alias
             let explanationKeyword = keyword;
             await loadAliases(); // Ensure aliases are loaded
-            
-            const foundAliasKW = aliasState.keywords.find(kw => 
+
+            const foundAliasKW = aliasState.keywords.find(kw =>
                 kw.aliases.some(a => a.name.toLowerCase() === keyword.toLowerCase())
             );
-            
+
             if (foundAliasKW) {
                 explanationKeyword = foundAliasKW.name;
-                console.log(`Using parent keyword "${explanationKeyword}" for explanation (original alias: "${keyword}")`);
             }
-            
+
             const response = await fetch('/api/gdd/explainer/explain', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1106,38 +1258,82 @@ document.addEventListener('DOMContentLoaded', function() {
                     language: selectedLanguage
                 })
             });
-            
+
             const result = await response.json();
             genStatus.textContent = result.success ? "✓ Completed" : "✕ Generation Failed";
             genStatus.style.color = result.success ? "var(--status-success)" : "var(--status-error)";
-            
-            if (!result.success) {
-                // Keep block display for error message
+
+            function setExplanationDisplay() {
                 explanationOutput.style.display = 'block';
                 explanationOutput.style.alignItems = 'stretch';
                 explanationOutput.style.justifyContent = 'flex-start';
+            }
+
+            if (!result.success) {
+                setExplanationDisplay();
                 explanationOutput.innerHTML = `<div class="placeholder-text"><p style="color:var(--status-error)">${result.explanation || 'Generation failed'}</p></div>`;
                 return;
             }
-            
-            // Explanation formatting
-            // Remove flex centering styles when content is present
-            explanationOutput.style.display = 'block';
-            explanationOutput.style.alignItems = 'stretch';
-            explanationOutput.style.justifyContent = 'flex-start';
-            explanationOutput.innerHTML = `<div class="generated-explanation" style="color: var(--foreground)">${renderMarkdown(result.explanation || '', 'Explanation', keyword)}</div>`;
-            
+
+            setExplanationDisplay();
+
+            // Build timing breakdown if available
+            let timingHTML = '';
+            if (result.timing_metadata) {
+                timingHTML = buildTimingBreakdown(result.timing_metadata);
+            }
+
+            explanationOutput.innerHTML = timingHTML + `<div class="generated-explanation" style="color: var(--foreground)">${renderMarkdown(result.explanation || '', 'Explanation', keyword)}</div>`;
+
+            // Store citations map for citation click handling
+            if (result.citations) {
+                currentCitations = result.citations;
+            } else {
+                currentCitations = {};
+            }
+
+            // Add click handlers to citation markers (use setTimeout to ensure DOM is ready)
+            setTimeout(() => {
+                setupCitationClickHandlers();
+            }, 100);
+
+            // Add toggle functionality for timing breakdown
+            if (result.timing_metadata) {
+                const toggleBtn = explanationOutput.querySelector('.timing-toggle');
+                const timingContent = explanationOutput.querySelector('.timing-content');
+                const toggleSpan = toggleBtn?.querySelector('span');
+                const toggleIcon = toggleBtn?.querySelector('.icon');
+
+                if (toggleBtn && timingContent && toggleSpan) {
+                    const totalTime = result.timing_metadata.total_time || 0;
+                    toggleBtn.addEventListener('click', () => {
+                        const isHidden = timingContent.style.display === 'none';
+                        timingContent.style.display = isHidden ? 'block' : 'none';
+                        toggleSpan.textContent = isHidden
+                            ? `⏱️ Hide Timing Details (Total: ${totalTime.toFixed(2)}s)`
+                            : `⏱️ Show Timing Details (Total: ${totalTime.toFixed(2)}s)`;
+                        if (toggleIcon) {
+                            toggleIcon.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+                        }
+                        toggleBtn.classList.toggle('expanded', isHidden);
+                    });
+                }
+            }
+
         } catch (error) {
             genStatus.textContent = "Network Error";
             genStatus.style.color = "var(--status-error)";
-            explanationOutput.innerHTML = `<p>Error: ${error.message}</p>`;
+            explanationOutput.style.display = 'block';
+            explanationOutput.style.alignItems = 'stretch';
+            explanationOutput.style.justifyContent = 'flex-start';
+            explanationOutput.innerHTML = `<div class="placeholder-text"><p style="color:var(--status-error)">Error: ${error.message || 'Unknown error occurred'}</p></div>`;
         } finally {
             explainBtn.disabled = false;
             updateGenerateButtonState();
         }
     }
-    
-    
+
+
     function updateSelectAllNoneState() {
         const checkboxes = explainerResultsCheckboxes.querySelectorAll('.section-row-checkbox');
         const checkedCount = explainerResultsCheckboxes.querySelectorAll('.section-row-checkbox:checked').length;
@@ -1146,7 +1342,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Update sticky badge
         const badge = document.getElementById('selected-count-badge');
         if (badge) badge.textContent = checkedCount;
-        
+
         if (checkedCount === 0) {
             selectAllCheckbox.checked = false;
             selectNoneCheckbox.checked = true;
@@ -1158,24 +1354,76 @@ document.addEventListener('DOMContentLoaded', function() {
             selectNoneCheckbox.checked = false;
         }
     }
-    
+
     function updateGenerateButtonState() {
         const selectedChoices = getSelectedChoices();
         const keyword = explainerKeyword.value.trim();
-        
+
         if (keyword && selectedChoices && selectedChoices.length > 0) {
             explainBtn.disabled = false;
         } else {
             explainBtn.disabled = true;
         }
     }
-    
+
+    function buildTimingBreakdown(timingMetadata) {
+        if (!timingMetadata) return '';
+
+        const validationTime = timingMetadata.validation_time || 0;
+        const hydeTime = timingMetadata.hyde_expansion_time || 0;
+        const sectionTimings = timingMetadata.section_timings || [];
+        const formattingTime = timingMetadata.formatting_time || 0;
+        const totalTime = timingMetadata.total_time || 0;
+
+        let html = `
+            <div class="timing-breakdown">
+                <button class="timing-toggle" type="button">
+                    <span>⏱️ Show Timing Details (Total: ${totalTime.toFixed(2)}s)</span>
+                    <svg class="icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+                <div class="timing-content" style="display: none;">
+                    <div class="timing-row">
+                        <span class="timing-label">Validation</span>
+                        <span class="timing-value">${validationTime}s</span>
+                    </div>
+                    <div class="timing-row">
+                        <span class="timing-label">HYDE Expansion</span>
+                        <span class="timing-value">${hydeTime}s</span>
+                    </div>`;
+
+        if (sectionTimings.length > 0) {
+            html += `<div class="timing-section-header">LLM Calls (by Section):</div>`;
+            sectionTimings.forEach(section => {
+                html += `
+                    <div class="timing-row timing-section">
+                        <span class="timing-label">${section.label}</span>
+                        <span class="timing-value">${section.time}s</span>
+                    </div>`;
+            });
+        }
+
+        html += `
+                    <div class="timing-row">
+                        <span class="timing-label">Formatting</span>
+                        <span class="timing-value">${formattingTime}s</span>
+                    </div>
+                    <div class="timing-row timing-total">
+                        <span class="timing-label">Total</span>
+                        <span class="timing-value">${totalTime}s</span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        return html;
+    }
+
     function renderMarkdown(text, stripHeading, keyword = '') {
         if (!text) return '';
-        
+
         // RENDERING ORDER: Process on plain text BEFORE markdown conversion
         let processedText = text;
-        
+
         // Step 1: Process *word* syntax from LLM (highlight important keywords/phrases)
         // Use a temporary marker to avoid conflicts with markdown **bold** syntax
         // Replace *word* with a temporary marker, then convert to HTML after markdown processing
@@ -1187,13 +1435,13 @@ document.addEventListener('DOMContentLoaded', function() {
             markerIndex++;
             return marker;
         });
-        
+
         // Step 2: Highlight search keyword in plain text (case-insensitive, whole words only)
         // This must happen BEFORE markdown rendering, but after *word* processing
         if (keyword && keyword.trim()) {
             const keywordEscaped = keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const keywordRegex = new RegExp(`\\b(${keywordEscaped})\\b`, 'gi');
-            
+
             // Find all existing markers to avoid overlapping highlights
             const markerPattern = /__HIGHLIGHT_MARKER_(\d+)__/g;
             const existingMarkers = [];
@@ -1205,12 +1453,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     index: parseInt(markerMatch[1])
                 });
             }
-            
+
             // Only highlight if not overlapping with existing markers
             processedText = processedText.replace(keywordRegex, (match, offset, string) => {
                 const matchStart = offset;
                 const matchEnd = offset + match.length;
-                
+
                 // Check if this match overlaps with any existing marker
                 for (const marker of existingMarkers) {
                     // If match is inside or overlaps with a marker, skip
@@ -1220,7 +1468,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         return match; // Skip, already highlighted via *word* syntax
                     }
                 }
-                
+
                 // Add as a new highlight marker
                 const marker = `__HIGHLIGHT_MARKER_${markerIndex}__`;
                 highlightMarkers.push(`<span class="keyword-highlight">${match}</span>`);
@@ -1228,7 +1476,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return marker;
             });
         }
-        
+
         // Step 3: Strip duplicate headings that match the bubble title
         if (stripHeading) {
             // Remove headings that exactly match the bubble title (case-insensitive)
@@ -1236,11 +1484,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 new RegExp(`^#+\\s*${stripHeading}\\s*$`, 'gim'),
                 new RegExp(`^#+\\s*${stripHeading.replace(/\s+/g, '\\s+')}\\s*$`, 'gim')
             ];
-            
+
             headingPatterns.forEach(pattern => {
                 processedText = processedText.replace(pattern, '');
             });
-            
+
             // Also remove if it's the first line and matches
             const lines = processedText.split('\n');
             if (lines.length > 0) {
@@ -1252,38 +1500,38 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         }
-        
+
         // Step 4: Convert markdown to HTML
         let html = processedText;
-        
+
         // Headers - NO <strong> wrapping, CSS will handle bold
         html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
         html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
         html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
-        
+
         // Markdown bold (**text**) - ONLY source of <strong> tags
         html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        
+
         // Lists
         html = html.replace(/^\- (.*$)/gim, '<li>$1</li>');
         html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
-        
+
         // Line breaks
         html = html.replace(/\n\n/g, '</p><p>');
         html = '<p>' + html + '</p>';
-        
+
         // Fix nested lists
         html = html.replace(/<p><ul>/g, '<ul>');
         html = html.replace(/<\/ul><\/p>/g, '</ul>');
         html = html.replace(/<p><li>/g, '<li>');
         html = html.replace(/<\/li><\/p>/g, '</li>');
         html = html.replace(/<p><\/p>/g, '');
-        
+
         // Step 5: Replace temporary highlight markers with actual HTML
         highlightMarkers.forEach((markerHtml, index) => {
             html = html.replace(`__HIGHLIGHT_MARKER_${index}__`, markerHtml);
         });
-        
+
         return html;
     }
 
@@ -1403,12 +1651,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!name.trim()) return;
         const kw = aliasState.keywords.find(k => k.id === kwId);
         if (!kw) return;
-        
+
         if (kw.aliases.some(a => a.name.toLowerCase() === name.trim().toLowerCase())) {
             alert("This alias already exists for this keyword");
             return;
         }
-        
+
         try {
             // Use parent keyword's language instead of detecting from alias name
             // Map keyword language codes to API language codes
@@ -1421,7 +1669,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     language = 'en';
                 }
             }
-            
+
             const response = await fetch('/api/manage/aliases', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1431,7 +1679,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     language: language
                 })
             });
-            
+
             if (response.ok) {
                 // Reload from server to get updated data
                 await loadAliases();
@@ -1447,14 +1695,14 @@ document.addEventListener('DOMContentLoaded', function() {
     window.handleDeleteAlias = async (kwId, aliasId) => {
         const kw = aliasState.keywords.find(k => k.id === kwId);
         if (!kw) return;
-        
+
         const alias = kw.aliases.find(a => a.id === aliasId);
         if (!alias) return;
-        
+
         if (!confirm(`Delete alias "${alias.name}" for keyword "${kw.name}"?`)) {
             return;
         }
-        
+
         try {
             const response = await fetch('/api/manage/aliases', {
                 method: 'DELETE',
@@ -1464,9 +1712,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     alias: alias.name
                 })
             });
-            
+
             const result = await response.json();
-            
+
             if (response.ok && result.success) {
                 // Remove from local state
                 kw.aliases = kw.aliases.filter(a => a.id !== aliasId);
@@ -1484,14 +1732,14 @@ document.addEventListener('DOMContentLoaded', function() {
     window.handleDeleteKeyword = async (id) => {
         const kw = aliasState.keywords.find(k => k.id === id);
         if (!kw) return;
-        
+
         if (!confirm(`Delete keyword "${kw.name}" and all its ${kw.aliases.length} alias(es)?`)) {
             return;
         }
-        
+
         try {
             // Delete all aliases for this keyword
-            const deletePromises = kw.aliases.map(alias => 
+            const deletePromises = kw.aliases.map(alias =>
                 fetch('/api/manage/aliases', {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
@@ -1501,14 +1749,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     })
                 })
             );
-            
+
             await Promise.all(deletePromises);
-            
+
             // Remove from local state
             aliasState.keywords = aliasState.keywords.filter(k => k.id !== id);
             aliasState.expandedKeywords.delete(id);
             renderAliases();
-            
+
             // Reload from server to ensure sync
             await loadAliases();
         } catch (error) {
@@ -1521,9 +1769,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const name = nameInput.value.trim();
         const langRadio = document.querySelector('input[name="new-alias-keyword-lang"]:checked');
         const lang = langRadio ? langRadio.value : 'EN';
-        
+
         if (!name) return;
-        
+
         if (aliasState.keywords.some(k => k.name.toLowerCase() === name.toLowerCase())) {
             alert("Keyword already exists");
             return;
@@ -1536,7 +1784,7 @@ document.addEventListener('DOMContentLoaded', function() {
             aliases: [],
             createdAt: new Date().toISOString()
         });
-        
+
         saveAliases();
         renderAliases();
         addAliasKeywordDialog.classList.add('hidden');
@@ -1545,14 +1793,14 @@ document.addEventListener('DOMContentLoaded', function() {
     // Sidebar Horizontal Resize Functionality
     const sidebar = document.querySelector('.explainer-left');
     const sidebarResizeHandle = document.getElementById('sidebar-resize-handle');
-    
+
     if (sidebar && sidebarResizeHandle) {
         let isResizing = false;
         let startX = 0;
         let startWidth = 0;
         const minWidth = 400; // Current size is minimum
         const maxWidth = 800;
-        
+
         sidebarResizeHandle.addEventListener('mousedown', (e) => {
             isResizing = true;
             startX = e.clientX;
@@ -1562,31 +1810,31 @@ document.addEventListener('DOMContentLoaded', function() {
             document.body.style.userSelect = 'none';
             e.preventDefault();
         });
-        
+
         document.addEventListener('mousemove', (e) => {
             if (!isResizing) return;
-            
+
             const delta = e.clientX - startX;
             let newWidth = startWidth + delta;
-            
+
             // Constrain to min/max width
             newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
-            
+
             sidebar.style.width = `${newWidth}px`;
         });
-        
+
         document.addEventListener('mouseup', () => {
             if (isResizing) {
                 isResizing = false;
                 sidebarResizeHandle.classList.remove('resizing');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
-                
+
                 // Save the width to sessionStorage
                 sessionStorage.setItem('explainer_sidebar_width', sidebar.offsetWidth);
             }
         });
-        
+
         // Load saved width on page load
         const savedWidth = sessionStorage.getItem('explainer_sidebar_width');
         if (savedWidth) {
@@ -1596,18 +1844,18 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     }
-    
+
     // Preview Panel Vertical Resize Functionality
     const previewPanel = document.getElementById('section-preview-panel');
     const previewResizeHandle = document.getElementById('preview-resize-handle');
-    
+
     if (previewPanel && previewResizeHandle) {
         let isResizingPreview = false;
         let startY = 0;
         let startHeight = 0;
         const minHeight = 300; // Current size is minimum (uppermost boundary)
         const maxHeight = window.innerHeight * 0.8; // 80vh
-        
+
         previewResizeHandle.addEventListener('mousedown', (e) => {
             isResizingPreview = true;
             startY = e.clientY;
@@ -1617,31 +1865,31 @@ document.addEventListener('DOMContentLoaded', function() {
             document.body.style.userSelect = 'none';
             e.preventDefault();
         });
-        
+
         document.addEventListener('mousemove', (e) => {
             if (!isResizingPreview) return;
-            
+
             const delta = e.clientY - startY;
             let newHeight = startHeight + delta;
-            
+
             // Constrain to min/max height
             newHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
-            
+
             previewPanel.style.height = `${newHeight}px`;
         });
-        
+
         document.addEventListener('mouseup', () => {
             if (isResizingPreview) {
                 isResizingPreview = false;
                 previewResizeHandle.classList.remove('resizing');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
-                
+
                 // Save the height to sessionStorage
                 sessionStorage.setItem('explainer_preview_height', previewPanel.offsetHeight);
             }
         });
-        
+
         // Load saved height on page load
         const savedHeight = sessionStorage.getItem('explainer_preview_height');
         if (savedHeight) {
@@ -1650,6 +1898,118 @@ document.addEventListener('DOMContentLoaded', function() {
                 previewPanel.style.height = `${height}px`;
             }
         }
+    }
+
+    function applyQueryFilter() {
+        if (!translationInfo) {
+            // No translation info, show all results
+            const allRows = explainerResultsCheckboxes.querySelectorAll('.doc-row, .section-row');
+            allRows.forEach(row => {
+                row.style.display = '';
+            });
+            return;
+        }
+
+        const enChecked = queryCheckboxEn ? queryCheckboxEn.checked : true;
+        const vnChecked = queryCheckboxVn ? queryCheckboxVn.checked : false;
+        const vnEnabled = queryCheckboxVn ? !queryCheckboxVn.disabled : false;
+
+        // If neither is checked, hide all results
+        if (!enChecked && (!vnChecked || !vnEnabled)) {
+            const allRows = explainerResultsCheckboxes.querySelectorAll('.doc-row, .section-row');
+            allRows.forEach(row => {
+                row.style.display = 'none';
+            });
+            // Update counts to show 0
+            const allDocRows = explainerResultsCheckboxes.querySelectorAll('.doc-row');
+            allDocRows.forEach(docRow => {
+                const docId = docRow.dataset.docId;
+                if (docId) {
+                    updateDocCheckboxState(docId);
+                }
+            });
+            return;
+        }
+
+        const originalKeyword = translationInfo.original?.toLowerCase() || '';
+        const translatedKeyword = translationInfo.translation?.toLowerCase() || '';
+
+        // Filter results based on matching keywords
+        const allRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
+
+        allRows.forEach(row => {
+            const index = parseInt(row.dataset.index);
+            if (isNaN(index)) {
+                row.style.display = 'none';
+                return;
+            }
+
+            const storeItem = storedResults[index];
+            if (!storeItem) {
+                row.style.display = 'none';
+                return;
+            }
+
+            // Get matching keywords for this chunk
+            const matchingKeywords = storeItem._matching_keywords || [];
+            let shouldShow = false;
+
+            if (matchingKeywords.length > 0) {
+                // Check if chunk contains original keyword
+                const hasOriginal = matchingKeywords.some(kw =>
+                    kw.toLowerCase() === originalKeyword
+                );
+
+                // Check if chunk contains translated keyword
+                const hasTranslation = matchingKeywords.some(kw =>
+                    kw.toLowerCase() === translatedKeyword
+                );
+
+                // Show if:
+                // - EN checked and chunk has original keyword, OR
+                // - VN checked and chunk has translated keyword
+                if (enChecked && hasOriginal) {
+                    shouldShow = true;
+                } else if (vnChecked && vnEnabled && hasTranslation) {
+                    shouldShow = true;
+                }
+
+                // Special case: if chunk contains both keywords, show if either checkbox is checked
+                if (hasOriginal && hasTranslation) {
+                    shouldShow = enChecked || (vnChecked && vnEnabled);
+                }
+            } else {
+                // No matching keywords info - hide by default (user must check a filter to see results)
+                shouldShow = false;
+            }
+
+            row.style.display = shouldShow ? '' : 'none';
+        });
+
+        // Update document row visibility based on child sections
+        const docRows = explainerResultsCheckboxes.querySelectorAll('.doc-row');
+        docRows.forEach(docRow => {
+            const docId = docRow.dataset.docId;
+            const childSections = explainerResultsCheckboxes.querySelectorAll(
+                `.section-row[data-doc-id="${docId}"]`
+            );
+            let hasVisibleChild = false;
+            childSections.forEach(sectionRow => {
+                if (sectionRow.style.display !== 'none') {
+                    hasVisibleChild = true;
+                }
+            });
+            docRow.style.display = hasVisibleChild ? '' : 'none';
+        });
+
+        // Update document counts after filtering
+        const allDocRows = explainerResultsCheckboxes.querySelectorAll('.doc-row');
+        allDocRows.forEach(docRow => {
+            const docId = docRow.dataset.docId;
+            if (docId) {
+                updateDocCheckboxState(docId);
+            }
+        });
     }
 });
 
