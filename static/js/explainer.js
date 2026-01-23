@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', function () {
     let deepSearchContext = null; // Track deep search: { originalKeyword, selectedKeyword }
     let selectedLanguage = 'en'; // Language preference: 'en' or 'vn'
     let translationInfo = null; // Store translation info from search: { original, translation }
+    let currentCitations = {}; // Store citations map from explanation response: { citation_number: { doc_id, doc_name, section_heading, chunk_id } }
 
     // Hierarchical view state
     let expandedDocs = new Set(); // Track which documents are expanded
@@ -1060,6 +1061,43 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    function setupCitationClickHandlers() {
+        // Add click handlers to all citation markers in the explanation
+        const citationMarkers = document.querySelectorAll('.citation-marker');
+
+        citationMarkers.forEach((marker) => {
+            marker.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const citationNumber = parseInt(marker.getAttribute('data-citation-number'));
+
+                if (!citationNumber || !currentCitations[citationNumber]) {
+                    return;
+                }
+
+                const citationInfo = currentCitations[citationNumber];
+                const docId = citationInfo.doc_id;
+                const docName = citationInfo.doc_name || docId;
+                const sectionHeading = citationInfo.section_heading || '';
+                const chunkId = citationInfo.chunk_id || '';
+
+                // Create a unique section ID for this citation (using chunk_id if available, otherwise doc_id + section_heading)
+                const sectionId = chunkId || `citation-${docId}-${sectionHeading}`;
+
+                // Check if this is the same chunk already being previewed
+                if (activePreviewId === sectionId) {
+                    // Same chunk, do nothing
+                    return;
+                }
+
+                // Call togglePreview with the citation's chunk info
+                // Note: content is empty since we'll fetch it via the preview API
+                togglePreview(sectionId, docName, sectionHeading || 'No section', '', docId, sectionHeading);
+            });
+        });
+    }
+
     function formatPreviewContent(content) {
         if (!content) return '<p class="placeholder-text">No content available.</p>';
 
@@ -1246,6 +1284,18 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             explanationOutput.innerHTML = timingHTML + `<div class="generated-explanation" style="color: var(--foreground)">${renderMarkdown(result.explanation || '', 'Explanation', keyword)}</div>`;
+
+            // Store citations map for citation click handling
+            if (result.citations) {
+                currentCitations = result.citations;
+            } else {
+                currentCitations = {};
+            }
+
+            // Add click handlers to citation markers (use setTimeout to ensure DOM is ready)
+            setTimeout(() => {
+                setupCitationClickHandlers();
+            }, 100);
 
             // Add toggle functionality for timing breakdown
             if (result.timing_metadata) {

@@ -2807,3 +2807,39 @@ main {
     position: relative;
     top: -0.3em;
 }
+
+/* Inline citation marker (NotebookLM style) */
+.citation-marker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    min-width: 1.4em;
+    height: 1.4em;
+    padding: 0 0.4em;
+
+    font-size: 0.75em;
+    font-weight: 600;
+    line-height: 1;
+
+    color: #1a73e8;
+    background-color: #eef3fd;
+
+    border-radius: 999px;
+    border: none;
+
+    cursor: pointer;
+    vertical-align: middle;
+
+    margin-left: 0.15em;
+    margin-right: 0.15em;
+}
+
+.citation-marker:hover {
+    background-color: #e0ebfb;
+}
+
+.citation-marker:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.25);
+}

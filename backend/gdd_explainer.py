@@ -575,6 +575,7 @@ def generate_explanation(keyword: str, selected_choices: List[str], stored_resul
             'source_chunks': chunks_text,
             'metadata': metadata_text,
             'timing_metadata': timing_metadata,
+            'citations': result.get('citations', {}),
             'success': True
         }
 

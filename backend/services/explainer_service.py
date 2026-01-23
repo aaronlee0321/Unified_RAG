@@ -90,16 +90,19 @@ def _add_citation_to_text(text: str, citation_number: int) -> str:
         citation_number: Citation number to add (1, 2, 3...)
 
     Returns:
-        Text with citations added to the end of each paragraph
+        Text with citations added to the end of each paragraph (as HTML span elements)
     """
     if not text:
         return text
 
     # Convert citation number to circled number
     if 1 <= citation_number <= 20:
-        citation = chr(0x2460 + citation_number - 1)  # ①-⑳
+        citation_char = chr(0x2460 + citation_number - 1)  # ①-⑳
     else:
-        citation = f"({citation_number})"
+        citation_char = f"({citation_number})"
+
+    # Wrap citation in HTML span with class and data attribute for click handling
+    citation_html = f'<span class="citation-marker" data-citation-number="{citation_number}">{citation_char}</span>'
 
     # Split text into paragraphs (double newline)
     paragraphs = text.split('\n\n')
@@ -112,7 +115,7 @@ def _add_citation_to_text(text: str, citation_number: int) -> str:
 
         # Remove trailing whitespace and add citation at the end of the paragraph
         para = para.rstrip()
-        cited_paragraphs.append(para + f" {citation}")
+        cited_paragraphs.append(para + f" {citation_html}")
 
     return '\n\n'.join(cited_paragraphs)
 
