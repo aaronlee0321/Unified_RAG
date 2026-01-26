@@ -46,15 +46,18 @@ def extract_metadata_from_text(text: str) -> Dict[str, Optional[str]]:
     normalized_text = re.sub(r'\s+', ' ', text)
     
     # Pattern for Version: "Version: v1.1" or "Phiên bản: v1.1"
+    # Handle cases with/without spaces: "Phiên bản:" or "Phiênbản:"
+    # Handle newlines between label and colon: "Phiênbản\n\n:v1.1"
     # Case-insensitive, handles various formats and newlines
     version_patterns = [
         # English: "Version: v1.1", "Version: 1.1", "Version: 1.1.0"
         # \s matches any whitespace including newlines
         r'Version\s*:\s*(v?\d+\.?\d*(?:\.\d+)?)',
         r'Version\s+(v?\d+\.?\d*(?:\.\d+)?)',
-        # Vietnamese: "Phiên bản: v1.1", "Phiên bản: 1.1"
-        r'Phiên\s+bản\s*:\s*(v?\d+\.?\d*(?:\.\d+)?)',
-        r'Phiên\s+bản\s+(v?\d+\.?\d*(?:\.\d+)?)',
+        # Vietnamese: "Phiên bản: v1.1", "Phiênbản: v1.1"
+        # Make space optional between "Phiên" and "bản", and handle newlines before colon
+        r'Phiên\s*bản\s*:\s*(v?\d+\.?\d*(?:\.\d+)?)',
+        r'Phiên\s*bản\s+(v?\d+\.?\d*(?:\.\d+)?)',
     ]
     
     for pattern in version_patterns:
@@ -148,6 +151,7 @@ def extract_metadata_from_text(text: str) -> Dict[str, Optional[str]]:
     
     # Pattern for Date: "Ngày tạo:", "Ngày tạo file:", or "Ngày cập nhật:" followed by date
     # Handle cases with/without spaces: "Ngày tạo:" or "Ngàytạo:"
+    # Handle newlines between label and colon: "Ngàytạo\n\n:07-09-2025"
     # Formats: "28 - 07 - 2025", "28/07/2025", "28-07-2025", "28.07.2025", "09-09-2025"
     # Handles newlines: "Ngày tạo:\n28 - 07 - 2025"
     date_patterns = [
