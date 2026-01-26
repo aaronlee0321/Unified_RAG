@@ -42,13 +42,16 @@ def extract_metadata_from_text(text: str) -> Dict[str, Optional[str]]:
             break
     
     # Pattern for Author: "Người viết:", "Người tạo:", or "Người tạo file:"
+    # Handle cases with/without spaces: "Người viết:" or "Ngườiviết:"
+    # Extract ALL authors from the content between author title and date title
+    # Handles list format: "- [x] phucth12\nthanhdv2\nlinhttd"
     author_patterns = [
-        r'Người\s+tạo\s+file\s*:\s*([^\n\r]*?)(?=\s+Ngày\s+(tạo|cập\s+nhật)|\s*\||\s*$)',
-        r'Người\s+viết\s*:\s*(?:[^\w]*\s*)?([a-zA-Z0-9_]+)',
-        r'Người\s+tạo\s*:\s*([^\n\r]*?)(?=\s+Ngày\s+(tạo|cập\s+nhật)|\s*\||\s*$)',
-        r'Người\s+viết\s*:\s*([^\n\r]{0,100}?)(?:\s*\([^)]+\))?',
-        r'Người\s+viết\s*:\s*\s*([a-zA-Z0-9_]+)',
-        r'Người\s+tạo\s*:\s*\s*([a-zA-Z0-9_]+)',
+        # "Người viết:" - capture everything until date title (with or without spaces)
+        r'Người\s*viết\s*:\s*([\s\S]*?)(?=\s*Ngày\s*(tạo|cập\s*nhật)|\s*\||\s*$)',
+        # "Người tạo file:" - capture everything until date title
+        r'Người\s*tạo\s*file\s*:\s*([\s\S]*?)(?=\s*Ngày\s*(tạo|cập\s*nhật)|\s*\||\s*$)',
+        # "Người tạo:" - capture everything until date title
+        r'Người\s*tạo\s*:\s*([\s\S]*?)(?=\s*Ngày\s*(tạo|cập\s*nhật)|\s*\||\s*$)',
     ]
     
     for pattern in author_patterns:
@@ -56,38 +59,83 @@ def extract_metadata_from_text(text: str) -> Dict[str, Optional[str]]:
         if match:
             author_text = match.group(1).strip()
             
-            # First, try to extract from parentheses if present
-            paren_match = re.search(r'\(([a-zA-Z0-9_]+)\)', author_text)
-            if paren_match:
-                metadata['author'] = paren_match.group(1).strip()
-                break
+            if not author_text:
+                continue
             
-            # Otherwise, extract username pattern
-            author_clean = re.sub(r'\([^)]+\)', '', author_text).strip()
-            username_match = re.search(r'\b([a-zA-Z0-9_]{3,20})\b', author_clean)
-            if username_match:
-                metadata['author'] = username_match.group(1).strip()
-            else:
-                fallback_match = re.search(r'([a-zA-Z0-9_]+)', author_clean)
-                if fallback_match:
-                    metadata['author'] = fallback_match.group(1).strip()
-            if metadata['author']:
+            # Extract all usernames from the author section
+            # Handle multiple formats:
+            # 1. List format: "- [x] phucth12\nthanhdv2\nlinhttd"
+            # 2. Plain text: "phucth12\nthanhdv2\nlinhttd"
+            # 3. With parentheses: "Kent (QuocTA)"
+            
+            authors = []
+            
+            # Split by newlines and process each line
+            lines = author_text.split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Skip if it's just a checkbox marker without username
+                if re.match(r'^-\s*\[[x\s]\]\s*$', line):
+                    continue
+                
+                # Extract username from list item: "- [x] phucth12" -> "phucth12"
+                list_match = re.search(r'(?:-\s*\[[x\s]\]\s*)?([a-zA-Z0-9_]{3,30})', line)
+                if list_match:
+                    username = list_match.group(1).strip()
+                    if username and username not in authors:
+                        authors.append(username)
+                    continue
+                
+                # Extract from parentheses first (preferred): "Kent (QuocTA)" -> "QuocTA"
+                paren_match = re.search(r'\(([a-zA-Z0-9_]+)\)', line)
+                if paren_match:
+                    username = paren_match.group(1).strip()
+                    if username and username not in authors:
+                        authors.append(username)
+                    # Also check for main name before parentheses
+                    main_match = re.search(r'([a-zA-Z0-9_]{3,30})(?=\s*\()', line)
+                    if main_match:
+                        main_username = main_match.group(1).strip()
+                        if main_username and main_username not in authors:
+                            authors.append(main_username)
+                    continue
+                
+                # Extract plain username from line
+                username_match = re.search(r'\b([a-zA-Z0-9_]{3,30})\b', line)
+                if username_match:
+                    username = username_match.group(1).strip()
+                    if username and username not in authors:
+                        authors.append(username)
+            
+            # If we found authors, join them with comma and space
+            if authors:
+                metadata['author'] = ', '.join(authors)
                 break
     
     # Pattern for Date: "Ngày tạo:", "Ngày tạo file:", or "Ngày cập nhật:"
+    # Handle cases with/without spaces: "Ngày tạo:" or "Ngàytạo:"
     date_patterns = [
-        r'Ngày\s+tạo\s*:\s*(\d{1,2}\s*-\s*\d{1,2}\s*-\s*\d{4})',
-        r'Ngày\s+tạo\s+file\s*:\s*(\d{1,2}\s*-\s*\d{1,2}\s*-\s*\d{4})',
-        r'Ngày\s+cập\s+nhật\s*:\s*(\d{1,2}\s*-\s*\d{1,2}\s*-\s*\d{4})',
-        r'Ngày\s+tạo\s*:\s*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',
-        r'Ngày\s+tạo\s+file\s*:\s*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',
-        r'Ngày\s+cập\s+nhật\s*:\s*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',
-        r'Ngày\s+tạo\s*:\s*(\d{1,2}\.\d{1,2}\.\d{4})',
-        r'Ngày\s+tạo\s+file\s*:\s*(\d{1,2}\.\d{1,2}\.\d{4})',
-        r'Ngày\s+cập\s+nhật\s*:\s*(\d{1,2}\.\d{1,2}\.\d{4})',
-        r'Ngày\s+tạo\s*:\s*(\d{1,2}\s*[-/\.]\s*\d{1,2}\s*[-/\.]\s*\d{4})',
-        r'Ngày\s+tạo\s+file\s*:\s*(\d{1,2}\s*[-/\.]\s*\d{1,2}\s*[-/\.]\s*\d{4})',
-        r'Ngày\s+cập\s+nhật\s*:\s*(\d{1,2}\s*[-/\.]\s*\d{1,2}\s*[-/\.]\s*\d{4})',
+        # "Ngày tạo:" - with or without spaces, handle "09-09-2025" format
+        r'Ngày\s*tạo\s*:\s*(\d{1,2}\s*-\s*\d{1,2}\s*-\s*\d{4})',
+        # "Ngày tạo file:" - with or without spaces
+        r'Ngày\s*tạo\s*file\s*:\s*(\d{1,2}\s*-\s*\d{1,2}\s*-\s*\d{4})',
+        # "Ngày cập nhật:" - with or without spaces
+        r'Ngày\s*cập\s*nhật\s*:\s*(\d{1,2}\s*-\s*\d{1,2}\s*-\s*\d{4})',
+        # "Ngày tạo:" - handle "09/09/2025" or "09-09-2025" format (no spaces in date)
+        r'Ngày\s*tạo\s*:\s*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',
+        r'Ngày\s*tạo\s*file\s*:\s*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',
+        r'Ngày\s*cập\s*nhật\s*:\s*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',
+        # "Ngày tạo:" - handle "09.09.2025" format
+        r'Ngày\s*tạo\s*:\s*(\d{1,2}\.\d{1,2}\.\d{4})',
+        r'Ngày\s*tạo\s*file\s*:\s*(\d{1,2}\.\d{1,2}\.\d{4})',
+        r'Ngày\s*cập\s*nhật\s*:\s*(\d{1,2}\.\d{1,2}\.\d{4})',
+        # More flexible: any date format after colon
+        r'Ngày\s*tạo\s*:\s*(\d{1,2}\s*[-/\.]\s*\d{1,2}\s*[-/\.]\s*\d{4})',
+        r'Ngày\s*tạo\s*file\s*:\s*(\d{1,2}\s*[-/\.]\s*\d{1,2}\s*[-/\.]\s*\d{4})',
+        r'Ngày\s*cập\s*nhật\s*:\s*(\d{1,2}\s*[-/\.]\s*\d{1,2}\s*[-/\.]\s*\d{4})',
     ]
     
     for pattern in date_patterns:
@@ -150,24 +198,20 @@ def extract_metadata_from_chunks(chunks: List[Dict[str, Any]]) -> Dict[str, Opti
             next_chunk = chunks[chunk_idx + 1]
             next_chunk_content = next_chunk.get('content', '')
             
-            # Check for author split
+            # Check for author split (handle both with/without spaces)
             if not metadata['author']:
                 chunk_end = chunk_content.rstrip()[-100:] if len(chunk_content) > 100 else chunk_content.rstrip()
-                if re.search(r'Người\s+(tạo|viết)(\s+file)?\s*:\s*$', chunk_end, re.IGNORECASE | re.MULTILINE):
-                    next_start = next_chunk_content[:200].strip()
-                    username_match = re.search(r'^([a-zA-Z0-9_]{3,30})(?:\s|$|\n|Ngày)', next_start, re.IGNORECASE | re.MULTILINE)
-                    if username_match:
-                        metadata['author'] = username_match.group(1).strip()
-                    else:
-                        combined = chunk_content.rstrip() + '\n' + next_chunk_content.lstrip()
-                        combined_metadata = extract_metadata_from_text(combined)
-                        if combined_metadata['author']:
-                            metadata['author'] = combined_metadata['author']
+                if re.search(r'Người\s*(tạo|viết)(\s*file)?\s*:\s*$', chunk_end, re.IGNORECASE | re.MULTILINE):
+                    # Combine chunks to extract all authors
+                    combined = chunk_content.rstrip() + '\n' + next_chunk_content.lstrip()
+                    combined_metadata = extract_metadata_from_text(combined)
+                    if combined_metadata['author']:
+                        metadata['author'] = combined_metadata['author']
             
-            # Check for date split
+            # Check for date split (handle both with/without spaces)
             if not metadata['date']:
                 chunk_end = chunk_content.rstrip()[-100:] if len(chunk_content) > 100 else chunk_content.rstrip()
-                if re.search(r'Ngày\s+(tạo|cập\s+nhật)(\s+file)?\s*:\s*$', chunk_end, re.IGNORECASE | re.MULTILINE):
+                if re.search(r'Ngày\s*(tạo|cập\s*nhật)(\s*file)?\s*:\s*$', chunk_end, re.IGNORECASE | re.MULTILINE):
                     next_start = next_chunk_content[:200].strip()
                     date_match = re.search(r'^(\d{1,2}\s*[-/\.]\s*\d{1,2}\s*[-/\.]\s*\d{4})', next_start, re.IGNORECASE | re.MULTILINE)
                     if date_match:
