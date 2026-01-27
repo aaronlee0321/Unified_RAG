@@ -82,9 +82,27 @@ def keyword_search(
             logger.info(f"[KEYWORD SEARCH] Result.data length: {data_length}")
             if data_length > 0:
                 logger.info(f"[KEYWORD SEARCH] First result keys: {list(result.data[0].keys()) if isinstance(result.data[0], dict) else 'Not a dict'}")
+                # Log first few results with relevance scores for debugging
+                logger.info(f"[KEYWORD SEARCH] First 5 results for keyword '{keyword_stripped}':")
+                for idx, item in enumerate(result.data[:5]):
+                    chunk_id = item.get('chunk_id', 'N/A')
+                    relevance = item.get('relevance', 'N/A')
+                    doc_id = item.get('doc_id', 'N/A')
+                    section = item.get('section_heading', 'N/A')
+                    content_preview = (item.get('content', '') or '')[:50]
+                    logger.info(f"  [{idx+1}] chunk_id={chunk_id}, relevance={relevance}, doc_id={doc_id}, section={section}, content_preview='{content_preview}...'")
         
         final_result = result.data if result.data else []
-        logger.info(f"[KEYWORD SEARCH] Returning {len(final_result)} results")
+        logger.info(f"[KEYWORD SEARCH] Returning {len(final_result)} results for keyword '{keyword_stripped}'")
+        
+        # Log relevance score distribution
+        if final_result:
+            relevances = [r.get('relevance', 0.0) for r in final_result if r.get('relevance') is not None]
+            if relevances:
+                logger.info(f"[KEYWORD SEARCH] Relevance score stats: min={min(relevances):.4f}, max={max(relevances):.4f}, avg={sum(relevances)/len(relevances):.4f}, count>0={sum(1 for r in relevances if r > 0.0)}")
+            else:
+                logger.warning(f"[KEYWORD SEARCH] No relevance scores found in results!")
+        
         logger.info("=" * 80)
         return final_result
         

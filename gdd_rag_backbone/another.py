@@ -26,7 +26,7 @@ import html
 from pathlib import Path
 from typing import Iterable
 
-from gdd_rag_backbone.llm_providers import GeminiProvider, make_llm_model_func, make_embedding_func
+from gdd_rag_backbone.llm_providers import QwenProvider, make_llm_model_func, make_embedding_func
 # Lazy imports for RAG functionality (only needed when indexing)
 
 
@@ -49,7 +49,7 @@ async def describe_code_file(
     parser: str | None = None,
 ) -> str:
     """Index the file (unless skipped) and run a RAG query to describe it."""
-    provider = GeminiProvider()
+    provider = QwenProvider()
     llm_func = make_llm_model_func(provider)
     embedding_func = make_embedding_func(provider)
 

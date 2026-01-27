@@ -31,9 +31,6 @@ pgvector>=0.2.0
 redis>=5.0.0
 cohere>=4.0.0
 
-# Free LLM options
-google-genai>=0.2.0  # For Google Gemini (FREE tier)
-
 # Translation and Language Detection
 deep-translator>=1.11.4  # Free Google Translate API (no API key needed)
 fast-langdetect>=0.1.0  # Fast language detection (80x faster than fastText)

@@ -335,7 +335,6 @@ def insert_gdd_chunks(chunks: List[Dict[str, Any]]) -> int:
                 # Database expects vector(1536) but some models produce different dimensions:
                 # - OpenAI text-embedding-3-small: 1536
                 # - OpenAI text-embedding-3-large: 3072
-                # - Gemini text-embedding-004: 768
                 # - Ollama mxbai-embed-large: 1024
                 # - Ollama nomic-embed-text: 768
                 expected_dim = 1536  # keyword_chunks table uses vector(1536)

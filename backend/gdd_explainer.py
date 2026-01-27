@@ -79,6 +79,31 @@ def _process_search_results(results: List[Dict], keyword: str, progress_messages
     """Process search results into the expected format."""
     doc_sections = {}
 
+    # Fetch document metadata (version, author, date) for all unique doc_ids
+    doc_metadata_map = {}
+    unique_doc_ids = set()
+    for result in results:
+        doc_id = result.get('doc_id')
+        if doc_id:
+            unique_doc_ids.add(doc_id)
+
+    if unique_doc_ids:
+        try:
+            client = get_supabase_client()
+            metadata_results = client.table('keyword_documents').select(
+                'doc_id, gdd_version, gdd_author, gdd_date'
+            ).in_('doc_id', list(unique_doc_ids)).execute()
+
+            if metadata_results.data:
+                for doc_meta in metadata_results.data:
+                    doc_metadata_map[doc_meta['doc_id']] = {
+                        'gdd_version': doc_meta.get('gdd_version'),
+                        'gdd_author': doc_meta.get('gdd_author'),
+                        'gdd_date': doc_meta.get('gdd_date')
+                    }
+        except Exception as e:
+            logger.warning(f"Failed to fetch document metadata: {e}")
+
     for result in results:
         try:
             section = result.get('section_heading')
@@ -136,6 +161,15 @@ def _process_search_results(results: List[Dict], keyword: str, progress_messages
                 'content': item.get('content', ''),
                 'chunk_id': item.get('chunk_id', '')
             }
+
+            # Add document metadata if available
+            doc_id = item.get('doc_id')
+            if doc_id and doc_id in doc_metadata_map:
+                metadata = doc_metadata_map[doc_id]
+                store_item['gdd_version'] = metadata.get('gdd_version')
+                store_item['gdd_author'] = metadata.get('gdd_author')
+                store_item['gdd_date'] = metadata.get('gdd_date')
+
             # Preserve matching keywords if they exist (for explanation generation)
             if '_matching_keywords' in item:
                 store_item['_matching_keywords'] = list(
@@ -245,16 +279,17 @@ def search_for_explainer(keyword: str) -> Dict[str, Any]:
         )
 
 
-def generate_explanation(keyword: str, selected_choices: List[str], stored_results: List[Dict], language: str = 'en') -> Dict[str, Any]:
+def generate_explanation(keyword: str, selected_choices: List[str], stored_results: List[Dict], selected_keywords: List[str] = None, language: str = 'en') -> Dict[str, Any]:
     """
     Generate explanation from selected items.
     EXACT COPY from keyword_extractor - adapted to return dict instead of Gradio components.
 
     Args:
-        keyword: Search keyword
+        keyword: Search keyword (primary keyword for display)
         selected_choices: List of selected choice labels
         stored_results: Stored search results data
-        language: Language preference ('en' or 'vn')
+        selected_keywords: List of keywords to query (original + translation). If None, uses keyword only.
+        language: Language preference ('en' or 'vn') - only affects output language, not which keywords are queried
 
     Returns:
         Dict with 'explanation', 'source_chunks', 'metadata', 'success'
@@ -354,156 +389,50 @@ def generate_explanation(keyword: str, selected_choices: List[str], stored_resul
         validation_end_time = time.perf_counter()
         validation_time = round(validation_end_time - validation_start_time, 2)
 
-        # Check if we need to generate explanations for multiple keywords per section
-        # Group selected items by section and check for multiple matching keywords
-        # Maps (doc_id, section) -> list of keywords to explain
-        section_keywords_map = {}
-        has_multi_keyword_sections = False
+        # Determine which keywords to use for querying
+        # Priority: selected_keywords (from frontend) > original keyword
+        logger.info("=" * 100)
+        logger.info(
+            f"[GENERATE EXPLANATION] ===== KEYWORD SELECTION DEBUG =====")
+        logger.info(f"[GENERATE EXPLANATION] Primary keyword: '{keyword}'")
+        logger.info(
+            f"[GENERATE EXPLANATION] selected_keywords received from frontend: {selected_keywords}")
+        logger.info(
+            f"[GENERATE EXPLANATION] Language parameter: '{language}' (only affects output language, not keyword selection)")
 
-        for choice in valid_selected_choices:
-            if choice in choice_to_item:
-                item = choice_to_item[choice]
-                doc_id = item['doc_id']
-                section = item.get('section_heading')
-                section_key = (doc_id, section)
-
-                matching_keywords = item.get('_matching_keywords', [])
-                if matching_keywords and len(matching_keywords) > 0:
-                    # Multiple keywords matched this section - explain each
-                    section_keywords_map[section_key] = matching_keywords
-                    if len(matching_keywords) > 1:
-                        has_multi_keyword_sections = True
-                else:
-                    # No matching keywords info - use the original keyword
-                    section_keywords_map[section_key] = [keyword.strip()]
-
-        # Only use multi-keyword logic if we actually have sections with multiple keywords
-        if has_multi_keyword_sections:
-            # Generate explanations for each keyword-section combination
-            all_section_results = []
-            for section_key, keywords_to_explain in section_keywords_map.items():
-                doc_id, section = section_key
-
-                # Only process multiple keywords, skip single keyword sections handled normally
-                if len(keywords_to_explain) > 1:
-                    for kw in keywords_to_explain:
-                        # Create selected_items for this specific keyword-section
-                        keyword_selected_items = [{
-                            'doc_id': doc_id,
-                            'section_heading': section
-                        }]
-
-                        # Generate explanation for this keyword in this section
-                        section_result = explain_keyword(
-                            kw, keyword_selected_items, use_hyde=True, language=language)
-
-                        if section_result and not section_result.get('error'):
-                            all_section_results.append({
-                                'keyword': kw,
-                                'section_key': section_key,
-                                'result': section_result
-                            })
-
-            # If we have multi-keyword results, combine them with single-keyword sections
-            if all_section_results:
-                # Get single-keyword sections and generate normally
-                single_keyword_sections = [
-                    {'doc_id': doc_id, 'section_heading': section}
-                    for (doc_id, section), keywords in section_keywords_map.items()
-                    if len(keywords) == 1
-                ]
-
-                if single_keyword_sections:
-                    # Generate explanation for single-keyword sections normally
-                    single_result = explain_keyword(
-                        keyword.strip(), single_keyword_sections, use_hyde=True, language=language)
-                    if single_result and not single_result.get('error'):
-                        # Add as a combined result
-                        all_section_results.append({
-                            'keyword': keyword.strip(),
-                            'section_key': None,  # Multiple sections
-                            'result': single_result
-                        })
-
-                # Use combined result path below
-                result = None  # Will be set in combined logic
-            else:
-                # No multi-keyword results, use normal flow
-                result = explain_keyword(
-                    keyword.strip(), selected_items, use_hyde=True, language=language)
+        keywords_to_query = None
+        if selected_keywords and len(selected_keywords) > 0:
+            # Use provided keywords (always includes both original and translation if available)
+            keywords_to_query = [kw.strip()
+                                 for kw in selected_keywords if kw and kw.strip()]
+            logger.info(
+                f"[GENERATE EXPLANATION] ✓ Using selected_keywords from frontend: {keywords_to_query}")
+            logger.info(
+                f"[GENERATE EXPLANATION] Number of keywords to query: {len(keywords_to_query)}")
         else:
-            # No multi-keyword sections, use normal behavior
-            result = explain_keyword(
-                keyword.strip(), selected_items, use_hyde=True, language=language)
-            all_section_results = []  # Initialize for consistency
+            # Fallback: use original keyword only
+            keywords_to_query = [keyword.strip()]
+            logger.warning(
+                f"[GENERATE EXPLANATION] ⚠ No selected_keywords provided, using keyword only: {keywords_to_query}")
+        logger.info("=" * 100)
 
-        # Combine all explanations if we have multi-keyword results
-        if has_multi_keyword_sections and all_section_results:
-            # Combine explanations from all keyword-section combinations
-            combined_explanations = []
-            all_source_chunks = []
-            all_citations = {}
-            citation_offset = 0
-            hyde_query = keyword.strip()
-            detected_language = 'english'
+        # Determine additional keywords (all except the primary keyword)
+        additional_keywords = None
+        if keywords_to_query and len(keywords_to_query) > 1:
+            # Get all keywords except the primary one
+            additional_keywords = [
+                kw for kw in keywords_to_query if kw.strip() != keyword.strip()]
+            logger.info(
+                f"[GENERATE EXPLANATION] Additional keywords to search: {additional_keywords}")
+        else:
+            logger.info(
+                f"[GENERATE EXPLANATION] Only one keyword, no additional keywords")
 
-            for section_data in all_section_results:
-                section_result = section_data['result']
-                kw = section_data['keyword']
-
-                explanation = section_result.get('explanation', '')
-                if explanation:
-                    # Prefix with keyword for clarity
-                    combined_explanations.append(
-                        f"**Explanation for '{kw}':**\n\n{explanation}")
-
-                # Collect source chunks and citations
-                chunks = section_result.get('source_chunks', [])
-                all_source_chunks.extend(chunks)
-
-                citations = section_result.get('citations', {})
-                for citation_num, citation_info in citations.items():
-                    all_citations[citation_offset +
-                                  citation_num] = citation_info
-                citation_offset += len(citations)
-
-                # Use first non-empty values
-                if section_result.get('hyde_query'):
-                    hyde_query = section_result['hyde_query']
-                if section_result.get('language'):
-                    detected_language = section_result['language']
-
-            # Combine all explanations
-            final_explanation = '\n\n---\n\n'.join(combined_explanations)
-
-            # Create combined result
-            timing_metadata_combined = {}
-            for section_data in all_section_results:
-                section_timing = section_data['result'].get(
-                    'timing_metadata', {})
-                if section_timing:
-                    # Merge timing metadata (could be improved to sum properly)
-                    if not timing_metadata_combined:
-                        timing_metadata_combined = section_timing.copy()
-                    else:
-                        # Sum section timings
-                        existing_sections = timing_metadata_combined.get(
-                            'section_timings', [])
-                        new_sections = section_timing.get(
-                            'section_timings', [])
-                        timing_metadata_combined['section_timings'] = existing_sections + new_sections
-
-            result = {
-                'explanation': final_explanation,
-                'source_chunks': all_source_chunks,
-                'hyde_query': hyde_query,
-                'language': detected_language,
-                'hyde_timing': {},
-                'chunks_used': len(all_source_chunks),
-                'citations': all_citations,
-                'error': None,
-                'timing_metadata': timing_metadata_combined
-            }
+        # Always use normal flow - explain_keyword will handle multiple keywords internally
+        # Pass additional_keywords so it searches with all keywords
+        result = explain_keyword(
+            keyword.strip(), selected_items, use_hyde=True, language=language,
+            additional_keywords=additional_keywords)
 
         if result.get('error'):
             return {

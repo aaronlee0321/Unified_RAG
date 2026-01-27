@@ -1,3 +1,7 @@
 python-3.11.9
 
-tell me what's the current pipe line for preview generation right now and tell me what are some ways we can do to improve the speed of answer generation 
+when user searches a keyword, we have two checkboxes, when we genearate explanation, do it using the tickboxes user ticks, 
+
+if user only ticks grass then only check for grass
+
+but if user query for có and grass, make sure to run current implementation, run for both

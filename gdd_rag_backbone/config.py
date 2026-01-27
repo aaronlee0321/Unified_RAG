@@ -51,19 +51,12 @@ else:
 
 QWEN_BASE_URL: Optional[str] = os.getenv("QWEN_BASE_URL", DEFAULT_QWEN_BASE_URL)
 
-VERTEX_PROJECT_ID: Optional[str] = os.getenv("VERTEX_PROJECT_ID")
-VERTEX_LOCATION: Optional[str] = os.getenv("VERTEX_LOCATION", "us-central1")
-
 OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL: Optional[str] = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
-# Google Gemini API configuration
-GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-
-# Model defaults - Using Google Gemini by default
-DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gemini-1.5-flash")
-# Gemini embedding model default
-DEFAULT_EMBEDDING_MODEL = os.getenv("DEFAULT_EMBEDDING_MODEL", "text-embedding-004")
+# Model defaults
+DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+DEFAULT_EMBEDDING_MODEL = os.getenv("DEFAULT_EMBEDDING_MODEL", "text-embedding-3-small")
 
 # Ensure directories exist
 DEFAULT_WORKING_DIR.mkdir(parents=True, exist_ok=True)

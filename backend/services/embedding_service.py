@@ -13,11 +13,6 @@ try:
 except Exception:  # pragma: no cover
     OpenAI = None  # type: ignore
 
-try:
-    from gdd_rag_backbone.llm_providers import GeminiProvider
-except Exception:  # pragma: no cover
-    GeminiProvider = None  # type: ignore
-
 
 def _get_openai_client() -> Optional["OpenAI"]:
     """
@@ -55,36 +50,30 @@ def embed_document_chunks(doc_id: str, model: Optional[str] = None, batch_size: 
     """
     Compute embeddings for all chunks of a document and store in 'embedding' column.
     EXACT LOGIC from keyword_extractor.
-    
+
     Args:
         doc_id: Document ID
         model: Embedding model (default: text-embedding-3-small)
         batch_size: Number of chunks per API call
-    
+
     Returns:
         Number of chunks embedded
     """
     client = get_supabase_client(use_service_key=True)
 
-    # Prefer Gemini embeddings if configured
-    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if gemini_key and GeminiProvider is not None:
-        from backend.shared.config import DEFAULT_EMBEDDING_MODEL
-        embedding_model = model or os.getenv("EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL or "text-embedding-004"
-        provider = GeminiProvider(api_key=gemini_key, embedding_model=embedding_model)
-        use_mode = "gemini"
-    else:
-        # Fallback: OpenAI-compatible embeddings (only if Gemini isn't configured)
-        openai_client = _get_openai_client()
-        if not openai_client:
-            return 0
-        from backend.shared.config import DEFAULT_EMBEDDING_MODEL
-        embedding_model = model or os.getenv("EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL
-        use_mode = "openai_compatible"
+    # Use OpenAI-compatible embeddings
+    openai_client = _get_openai_client()
+    if not openai_client:
+        return 0
+    from backend.shared.config import DEFAULT_EMBEDDING_MODEL
+    embedding_model = model or os.getenv(
+        "EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL
+    use_mode = "openai_compatible"
 
     # Fetch chunks without embeddings (or re-embed all)
     # Note: Supabase python client doesn't support vector IS NULL directly; fetch content+ids
-    resp = client.table("keyword_chunks").select("id, chunk_id, content").eq("doc_id", doc_id).execute()
+    resp = client.table("keyword_chunks").select(
+        "id, chunk_id, content").eq("doc_id", doc_id).execute()
     chunks: List[Dict] = resp.data or []
     if not chunks:
         return 0
@@ -93,15 +82,13 @@ def embed_document_chunks(doc_id: str, model: Optional[str] = None, batch_size: 
 
     # Batch process
     for i in range(0, len(chunks), batch_size):
-        batch = chunks[i : i + batch_size]
+        batch = chunks[i: i + batch_size]
         texts = [c["content"] for c in batch]
 
         # Call embedding API
-        if use_mode == "gemini":
-            vectors = provider.embed(texts)  # type: ignore
-        else:
-            emb = openai_client.embeddings.create(model=embedding_model, input=texts)
-            vectors = [e.embedding for e in emb.data]
+        emb = openai_client.embeddings.create(
+            model=embedding_model, input=texts)
+        vectors = [e.embedding for e in emb.data]
 
         # Upsert embeddings back per row
         update_rows = []
@@ -113,9 +100,3 @@ def embed_document_chunks(doc_id: str, model: Optional[str] = None, batch_size: 
         total_embedded += len(update_rows)
 
     return total_embedded
-
-
-
-
-
-

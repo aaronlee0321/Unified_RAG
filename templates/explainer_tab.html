@@ -135,10 +135,16 @@
                             <span id="preview-section-title" class="preview-section-title">Section Title</span>
                         </div>
                     </div>
-                    <button id="close-preview-btn" class="action-btn" title="Close preview">
-                        <img src="{{ url_for('static', filename='icons/close.svg') }}" width="16" height="16"
-                            style="opacity: 0.5;">
-                    </button>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <button id="preview-full-doc-btn" class="preview-btn">
+                            <img src="{{ url_for('static', filename='icons/eye.svg') }}" width="12" height="12">
+                            <span>View Doc</span>
+                        </button>
+                        <button id="close-preview-btn" class="action-btn" title="Close preview">
+                            <img src="{{ url_for('static', filename='icons/close.svg') }}" width="16" height="16"
+                                style="opacity: 0.5;">
+                        </button>
+                    </div>
                 </div>
                 <div id="preview-content" class="preview-panel-content scroll-area">
                     <!-- Section content will be inserted here -->
@@ -262,6 +268,29 @@
             <button id="confirm-add-alias-keyword" class="btn-primary"
                 style="width: 100%; margin-top: 8px; height: 40px;">Create Keyword</button>
         </div>
+    </div>
+</div>
+
+<!-- Document Viewer Sidebar -->
+<div id="document-viewer-sidebar" class="preview-panel"
+    style="width: 600px; background: white; border-left: 1px solid var(--border); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; z-index: 50; position: fixed; right: 0; top: 0; height: 100vh; transform: translateX(100%); transition: transform 0.3s ease-in-out;">
+    <div class="preview-panel-header">
+        <div class="preview-panel-title">
+            <img src="{{ url_for('static', filename='icons/file.svg') }}" width="18" height="18" style="opacity: 0.7;">
+            <div class="preview-panel-title-text">
+                <span id="document-viewer-doc-name" class="preview-doc-name">Document Preview</span>
+            </div>
+        </div>
+        <button id="close-document-viewer-btn" class="action-btn" title="Close document viewer">
+            <img src="{{ url_for('static', filename='icons/close.svg') }}" width="16" height="16" style="opacity: 0.5;">
+        </button>
+    </div>
+    <div id="document-viewer-content" class="preview-panel-content flex-1"
+        style="display: flex; flex-direction: column; padding: 0; overflow: hidden; min-height: 0; height: 100%;">
+        <p class="placeholder-text"
+            style="text-align: center; color: var(--muted-foreground); font-size: 0.875rem; margin: auto;">
+            Document preview will appear here.
+        </p>
     </div>
 </div>
 

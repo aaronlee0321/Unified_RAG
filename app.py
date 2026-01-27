@@ -962,13 +962,16 @@ def explainer_explain():
         keyword = data.get('keyword', '')
         selected_choices = data.get('selected_choices', [])
         stored_results = data.get('stored_results', [])
-        language = data.get('language', 'en')  # 'en' or 'vn'
+        selected_keywords = data.get('selected_keywords', [])  # List of keywords to query (original + translation)
+        language = data.get('language', 'en')  # 'en' or 'vn' - only affects output language
 
-        app.logger.info(f"[EXPLAINER EXPLAIN] keyword='{keyword}', choices={len(selected_choices)}, results={len(stored_results)}, lang={language}")
+        app.logger.info(
+            f"[EXPLAINER EXPLAIN] keyword='{keyword}', selected_keywords={selected_keywords}, choices={len(selected_choices)}, results={len(stored_results)}, lang={language}")
 
         result = generate_explanation(
-            keyword, selected_choices, stored_results, language=language)
-        app.logger.info(f"[EXPLAINER EXPLAIN] Generation complete, success={result.get('success', False)}")
+            keyword, selected_choices, stored_results, selected_keywords=selected_keywords, language=language)
+        app.logger.info(
+            f"[EXPLAINER EXPLAIN] Generation complete, success={result.get('success', False)}")
         return jsonify(result)
     except Exception as e:
         app.logger.error(f"[EXPLAINER EXPLAIN] Error: {e}")
@@ -1030,6 +1033,37 @@ def deep_search():
         app.logger.error(
             f"Error in deep search: {e}\n{traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/gdd/explainer/get-pdf-url', methods=['POST'])
+def explainer_get_pdf_url():
+    """Get PDF URL from Supabase Storage for a document"""
+    try:
+        from backend.storage.supabase_client import get_gdd_document_pdf_url
+
+        data = request.get_json()
+        doc_id = data.get('doc_id', '').strip()
+
+        if not doc_id:
+            return jsonify({'error': 'doc_id is required', 'success': False}), 400
+
+        pdf_url = get_gdd_document_pdf_url(doc_id)
+
+        if pdf_url:
+            return jsonify({'pdf_url': pdf_url, 'success': True})
+        else:
+            return jsonify({
+                'error': f'No PDF found for document: {doc_id}',
+                'success': False
+            }), 404
+    except Exception as e:
+        app.logger.error(f"Error in explainer_get_pdf_url: {e}")
+        import traceback
+        app.logger.error(traceback.format_exc())
+        return jsonify({
+            'error': str(e),
+            'success': False
+        }), 500
 
 
 @app.route('/api/gdd/explainer/preview', methods=['POST'])

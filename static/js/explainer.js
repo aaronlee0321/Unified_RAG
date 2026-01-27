@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Hierarchical view state
     let expandedDocs = new Set(); // Track which documents are expanded
     let activePreviewId = null; // Track which section is being previewed
+    let activePreviewDocIds = {}; // Map sectionId -> docId for all active previews (supports multiple docs)
     let groupedResults = {}; // { docName: [{ choice, storeItem, index }] }
 
     // Alias management state
@@ -94,13 +95,22 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Manage Aliases Event Listeners
     if (openAliasesBtn) openAliasesBtn.addEventListener('click', () => {
-        // Trigger 1-second animation
-        openAliasesBtn.classList.add('animating');
-        setTimeout(() => openAliasesBtn.classList.remove('animating'), 1000);
+        // Check if drawer is already open - toggle it
+        const isOpen = aliasesDrawer && aliasesDrawer.classList.contains('open');
 
-        aliasesDrawer.classList.add('open');
-        loadAliases();
-        saveExplainerState(); // Save state when drawer opens
+        if (isOpen) {
+            // Close the drawer
+            aliasesDrawer.classList.remove('open');
+            saveExplainerState(); // Save state when drawer closes
+        } else {
+            // Open the drawer
+            openAliasesBtn.classList.add('animating');
+            setTimeout(() => openAliasesBtn.classList.remove('animating'), ANIMATION_DURATION);
+
+            aliasesDrawer.classList.add('open');
+            loadAliases();
+            saveExplainerState(); // Save state when drawer opens
+        }
     });
     if (closeAliasesBtn) closeAliasesBtn.addEventListener('click', () => {
         aliasesDrawer.classList.remove('open');
@@ -128,6 +138,20 @@ document.addEventListener('DOMContentLoaded', function () {
                 saveExplainerState(); // Save state when drawer closes
             }
         }
+
+        // Close all metadata chat bubbles when clicking outside
+        const openBubbles = document.querySelectorAll('.metadata-chat-bubble[style*="flex"]');
+        if (openBubbles.length > 0) {
+            const clickedBubble = Array.from(openBubbles).find(bubble => bubble.contains(e.target));
+            const clickedVersionBubble = e.target.closest('[data-version-bubble]');
+
+            // Close if click is outside any bubble and not on a version bubble
+            if (!clickedBubble && !clickedVersionBubble) {
+                openBubbles.forEach(bubble => {
+                    bubble.style.display = 'none';
+                });
+            }
+        }
     });
 
     if (aliasSearchInput) aliasSearchInput.addEventListener('input', (e) => {
@@ -136,7 +160,8 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     if (aliasAddKeywordBtn) aliasAddKeywordBtn.addEventListener('click', () => {
         addAliasKeywordDialog.classList.remove('hidden');
-        document.getElementById('new-alias-keyword-name').focus();
+        const newKeywordInput = getElement('new-alias-keyword-name');
+        if (newKeywordInput) newKeywordInput.focus();
     });
     if (addAliasKeywordDialog) {
         addAliasKeywordDialog.querySelector('.close-dialog-btn').onclick = () => addAliasKeywordDialog.classList.add('hidden');
@@ -179,15 +204,32 @@ document.addEventListener('DOMContentLoaded', function () {
     // Flag to prevent saving during restore
     let isRestoring = false;
 
+    // Constants
+    const STORAGE_KEY = 'explainer_state';
+    const RESTORE_DELAY_SHORT = 50;
+    const RESTORE_DELAY_MEDIUM = 150;
+    const RESTORE_DELAY_LONG = 250;
+    const ANIMATION_DURATION = 1000;
+
+    // Helper: Get DOM element safely
+    function getElement(id) {
+        return document.getElementById(id);
+    }
+
     // State persistence functions
     function saveExplainerState() {
-        if (isRestoring) return; // Don't save during restore
+        if (isRestoring) {
+            return;
+        }
         try {
             const selectedChoices = getSelectedChoices();
-            const previewPanel = document.getElementById('section-preview-panel');
-            const previewContent = document.getElementById('preview-content');
-            const previewDocName = document.getElementById('preview-doc-name');
-            const previewSectionTitle = document.getElementById('preview-section-title');
+            const previewPanel = getElement('section-preview-panel');
+            const previewContent = getElement('preview-content');
+            const previewDocName = getElement('preview-doc-name');
+            const previewSectionTitle = getElement('preview-section-title');
+            const documentViewerSidebar = getElement('document-viewer-sidebar');
+            const documentViewerContent = getElement('document-viewer-content');
+            const documentViewerDocName = getElement('document-viewer-doc-name');
 
             const state = {
                 keyword: explainerKeyword.value,
@@ -197,6 +239,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 translationInfo: translationInfo,
                 expandedDocs: Array.from(expandedDocs),
                 activePreviewId: activePreviewId,
+                activePreviewDocIds: activePreviewDocIds,
                 queryCheckboxEn: queryCheckboxEn ? queryCheckboxEn.checked : true,
                 queryCheckboxVn: queryCheckboxVn ? queryCheckboxVn.checked : false,
                 explanationOutput: explanationOutput ? explanationOutput.innerHTML : '',
@@ -208,39 +251,66 @@ document.addEventListener('DOMContentLoaded', function () {
                 previewDocName: previewDocName ? previewDocName.textContent : '',
                 previewSectionTitle: previewSectionTitle ? previewSectionTitle.textContent : '',
                 generationInProgress: generationInProgress,
-                previewLoadingInProgress: previewLoadingInProgress
+                previewLoadingInProgress: previewLoadingInProgress,
+                documentViewerOpen: documentViewerSidebar ? documentViewerSidebar.style.transform === 'translateX(0)' : false,
+                documentViewerContent: documentViewerContent ? documentViewerContent.innerHTML : '',
+                documentViewerDocName: documentViewerDocName ? documentViewerDocName.textContent : ''
             };
-            sessionStorage.setItem('explainer_state', JSON.stringify(state));
-            console.log('[Explainer] State saved to sessionStorage');
+
+            const stateJson = JSON.stringify(state);
+            localStorage.setItem(STORAGE_KEY, stateJson);
+
+            // Verify save succeeded
+            const verify = localStorage.getItem(STORAGE_KEY);
+            if (verify !== stateJson) {
+                console.error('[Explainer] State verification failed - saved state does not match');
+            }
         } catch (e) {
             console.error('[Explainer] Error saving state:', e);
         }
     }
 
     function restoreExplainerState() {
-        isRestoring = true; // Set flag to prevent saving during restore
+        isRestoring = true;
         try {
-            const savedState = sessionStorage.getItem('explainer_state');
+            const savedState = localStorage.getItem(STORAGE_KEY);
             if (!savedState) {
-                console.log('[Explainer] No saved state found');
+                isRestoring = false;
                 return false;
             }
 
-            console.log('[Explainer] Restoring state from sessionStorage');
             const state = JSON.parse(savedState);
 
             // Restore basic state
-            if (state.keyword) explainerKeyword.value = state.keyword;
-            if (state.storedResults) storedResults = state.storedResults;
-            if (state.lastSearchKeyword) lastSearchKeyword = state.lastSearchKeyword;
-            if (state.selectedLanguage) selectedLanguage = state.selectedLanguage;
-            if (state.translationInfo) translationInfo = state.translationInfo;
-            if (state.expandedDocs) expandedDocs = new Set(state.expandedDocs);
-            if (state.activePreviewId) activePreviewId = state.activePreviewId;
-            if (state.currentCitations) currentCitations = state.currentCitations;
+            if (state.keyword) {
+                explainerKeyword.value = state.keyword;
+            }
+            if (state.storedResults) {
+                storedResults = state.storedResults;
+            }
+            if (state.lastSearchKeyword) {
+                lastSearchKeyword = state.lastSearchKeyword;
+            }
+            if (state.selectedLanguage) {
+                selectedLanguage = state.selectedLanguage;
+            }
+            if (state.translationInfo) {
+                translationInfo = state.translationInfo;
+            }
+            if (state.expandedDocs) {
+                expandedDocs = new Set(state.expandedDocs);
+            }
+            if (state.activePreviewId) {
+                activePreviewId = state.activePreviewId;
+            }
+            if (state.activePreviewDocIds) {
+                activePreviewDocIds = state.activePreviewDocIds;
+            }
+            if (state.currentCitations) {
+                currentCitations = state.currentCitations;
+            }
             if (state.generationInProgress !== undefined) {
                 generationInProgress = state.generationInProgress;
-                console.log('[Explainer] Restored generationInProgress:', generationInProgress, 'hasExplanationOutput:', !!state.explanationOutput);
             }
             if (state.previewLoadingInProgress !== undefined) {
                 previewLoadingInProgress = state.previewLoadingInProgress;
@@ -259,82 +329,80 @@ document.addEventListener('DOMContentLoaded', function () {
                 queryCheckboxVn.checked = state.queryCheckboxVn;
             }
 
+            // Always show results container if we have a keyword or stored results
+            if (state.keyword || (storedResults && storedResults.length > 0)) {
+                explainerResultsContainer.style.display = 'flex';
+                const emptyLeft = getElement('explainer-empty-left');
+                if (emptyLeft) {
+                    emptyLeft.style.display = 'none';
+                }
+            }
+
             // Restore UI if we have stored results
             if (storedResults && storedResults.length > 0) {
-                // Show results container
-                explainerResultsContainer.style.display = 'flex';
-                const emptyLeft = document.getElementById('explainer-empty-left');
-                if (emptyLeft) emptyLeft.style.display = 'none';
-
-                // Update results count displays
-                const resultsCountNumber = document.getElementById('results-count-number');
-                if (resultsCountNumber) resultsCountNumber.textContent = storedResults.length.toString();
-                if (resultsCount) {
-                    resultsCount.textContent = `Found ${storedResults.length} result(s)`;
-                    resultsCount.style.color = "var(--muted-foreground)";
-                    resultsCount.style.display = 'block';
-                }
-
-                // Show query filter container if translation info exists
-                if (queryFilterContainer && translationInfo && translationInfo.original) {
-                    queryFilterContainer.style.display = 'flex';
-                }
-
                 // Convert storedResults back to choice labels (format: "docName → section")
-                // renderCheckboxes expects an array of choice label strings, not storedResults objects
                 const choiceLabels = storedResults.map(item => {
-                    const displayName = item.doc_name || 'Unknown Document';
-                    const sectionDisplay = item.section_heading || "(No section)";
+                    if (typeof item === 'string') return item;
+                    const displayName = item?.doc_name || 'Unknown Document';
+                    const sectionDisplay = item?.section_heading || "(No section)";
                     return `${displayName} → ${sectionDisplay}`;
-                });
+                }).filter(label => label && typeof label === 'string');
 
-                renderCheckboxes(choiceLabels);
-                applyQueryFilter();
+                // Wait for DOM to be ready before rendering
+                setTimeout(() => {
+                    try {
+                        if (explainerResultsCheckboxes) {
+                            renderCheckboxes(choiceLabels);
+                            setTimeout(() => {
+                                applyQueryFilter();
+                            }, RESTORE_DELAY_SHORT);
+                        } else {
+                            isRestoring = false;
+                        }
+                    } catch (e) {
+                        console.error('[Explainer] Error during restore renderCheckboxes:', e);
+                        isRestoring = false;
+                    }
+                }, RESTORE_DELAY_SHORT);
 
-                // Restore expanded documents after render
+                // Restore expanded documents (after renderCheckboxes completes)
                 setTimeout(() => {
                     expandedDocs.forEach(docId => {
-                        const sectionsContainer = document.getElementById(`sections-${docId}`);
-                        const docRow = document.querySelector(`.doc-row[data-doc-id="${docId}"]`);
+                        const sectionsContainer = getElement(`sections-${docId}`);
                         if (sectionsContainer) {
                             sectionsContainer.classList.add('expanded');
-                        }
-                        if (docRow) {
-                            const chevron = docRow.querySelector('.doc-row-chevron');
+                            const chevron = document.querySelector(`[data-doc-id="${docId}"] .doc-row-chevron`);
                             if (chevron) {
                                 chevron.classList.add('expanded');
                             }
                         }
                     });
-                }, 50);
 
-                // Restore selected checkboxes based on stored selectedChoices
-                if (state.selectedChoices && state.selectedChoices.length > 0) {
-                    // Restore checkbox states by matching choice labels
-                    state.selectedChoices.forEach(choiceLabel => {
-                        const sectionRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
-                        sectionRows.forEach(row => {
-                            const checkbox = row.querySelector('.section-row-checkbox');
-                            if (checkbox && checkbox.value === choiceLabel) {
-                                checkbox.checked = true;
-                                updateSectionSelection(row, true);
-                            }
+                    // Restore selected checkboxes based on stored selectedChoices
+                    if (state.selectedChoices && state.selectedChoices.length > 0) {
+                        state.selectedChoices.forEach(choiceLabel => {
+                            const sectionRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
+                            sectionRows.forEach(row => {
+                                const checkbox = row.querySelector('.section-row-checkbox');
+                                if (checkbox && checkbox.value === choiceLabel) {
+                                    checkbox.checked = true;
+                                    updateSectionSelection(row, true);
+                                }
+                            });
                         });
-                    });
 
-                    // Update document checkbox states (use doc_name to compute frontend docId)
-                    const allDocNames = new Set();
-                    storedResults.forEach(item => {
-                        if (item.doc_name) allDocNames.add(item.doc_name);
-                    });
-                    allDocNames.forEach(docName => {
-                        const docId = `doc-${hashString(docName)}`;
-                        updateDocCheckboxState(docId);
-                    });
+                        // Update document checkbox states
+                        const allDocIds = new Set();
+                        storedResults.forEach(item => {
+                            if (item.doc_id) allDocIds.add(item.doc_id);
+                        });
+                        allDocIds.forEach(docId => {
+                            updateDocCheckboxState(docId);
+                        });
+                    }
 
-                    // Update select all/none state and selected count badge
-                    updateSelectAllNoneState();
-                }
+                    isRestoring = false;
+                }, RESTORE_DELAY_LONG);
 
                 // Restore explanation output if it exists
                 if (state.explanationOutput && explanationOutput) {
@@ -348,15 +416,12 @@ document.addEventListener('DOMContentLoaded', function () {
                         setupCitationClickHandlers();
                     }, 100);
                 }
+            } else {
+                isRestoring = false;
             }
 
-            // Check for interrupted generation (outside storedResults block)
-            // This handles cases where generation was in progress but no explanation was saved
+            // Check for interrupted generation
             if (state.generationInProgress && !state.explanationOutput && explanationOutput) {
-                console.log('[Explainer] Detected interrupted generation:', {
-                    generationInProgress: state.generationInProgress,
-                    hasExplanationOutput: !!state.explanationOutput
-                });
                 explanationOutput.style.display = 'block';
                 explanationOutput.innerHTML = `
                     <div class="placeholder-text" style="text-align: center; padding: 32px;">
@@ -368,55 +433,73 @@ document.addEventListener('DOMContentLoaded', function () {
                         </p>
                     </div>
                 `;
-                generationInProgress = false; // Reset flag
-                saveExplainerState(); // Save updated state
+                generationInProgress = false;
+                saveExplainerState();
             }
 
-            // Restore aliases drawer state (outside storedResults check)
+            // Restore aliases drawer state
             if (state.aliasesDrawerOpen && aliasesDrawer) {
                 aliasesDrawer.classList.add('open');
-                loadAliases(); // Load aliases when drawer is opened
+                loadAliases();
             }
 
-            // Restore preview panel state (must be after renderCheckboxes so sections exist)
-            // Use setTimeout to ensure DOM is ready after renderCheckboxes
+            // Restore document viewer state
+            if (state.documentViewerOpen && documentViewerSidebar) {
+                setTimeout(() => {
+                    try {
+                        documentViewerSidebar.style.transform = 'translateX(0)';
+                        const documentViewerContent = getElement('document-viewer-content');
+                        const documentViewerDocName = getElement('document-viewer-doc-name');
+                        if (documentViewerContent && state.documentViewerContent) {
+                            documentViewerContent.innerHTML = state.documentViewerContent;
+                        }
+                        if (documentViewerDocName && state.documentViewerDocName) {
+                            documentViewerDocName.textContent = state.documentViewerDocName;
+                        }
+                        if (previewFullDocBtn) {
+                            previewFullDocBtn.classList.add('active');
+                        }
+                    } catch (e) {
+                        console.error('[Explainer] Error restoring document viewer:', e);
+                    }
+                }, RESTORE_DELAY_MEDIUM);
+            }
+
+            // Restore preview panel state
             if (state.previewPanelOpen && state.activePreviewId && state.previewContent) {
                 setTimeout(() => {
-                    const previewPanel = document.getElementById('section-preview-panel');
-                    const previewContent = document.getElementById('preview-content');
-                    const previewDocName = document.getElementById('preview-doc-name');
-                    const previewSectionTitle = document.getElementById('preview-section-title');
-                    const explainerRight = document.querySelector('.explainer-right');
+                    try {
+                        const previewPanel = getElement('section-preview-panel');
+                        const previewContent = getElement('preview-content');
+                        const previewDocName = getElement('preview-doc-name');
+                        const previewSectionTitle = getElement('preview-section-title');
+                        const explainerRight = document.querySelector('.explainer-right');
 
-                    if (previewPanel && previewContent) {
-                        // Restore preview content
-                        previewContent.innerHTML = state.previewContent;
-                        if (state.previewDocName && previewDocName) {
-                            previewDocName.textContent = state.previewDocName;
+                        if (previewPanel && previewContent) {
+                            previewContent.innerHTML = state.previewContent;
+                            if (state.previewDocName && previewDocName) {
+                                previewDocName.textContent = state.previewDocName;
+                            }
+                            if (state.previewSectionTitle && previewSectionTitle) {
+                                previewSectionTitle.textContent = state.previewSectionTitle;
+                            }
+                            previewPanel.classList.remove('hidden');
+                            if (explainerRight) {
+                                explainerRight.classList.add('preview-open');
+                            }
+                            updatePreviewActiveState();
                         }
-                        if (state.previewSectionTitle && previewSectionTitle) {
-                            previewSectionTitle.textContent = state.previewSectionTitle;
-                        }
-
-                        // Show preview panel
-                        previewPanel.classList.remove('hidden');
-                        if (explainerRight) {
-                            explainerRight.classList.add('preview-open');
-                        }
-
-                        // Update active state in sidebar (activePreviewId is already restored above)
-                        updatePreviewActiveState();
+                    } catch (e) {
+                        console.error('[Explainer] Error restoring preview panel:', e);
                     }
-                }, 100);
+                }, RESTORE_DELAY_MEDIUM + RESTORE_DELAY_SHORT);
             }
 
             updateGenerateButtonState();
-            isRestoring = false; // Clear flag after restore
-            console.log('[Explainer] State restored successfully');
             return true;
         } catch (e) {
             console.error('[Explainer] Error restoring state:', e);
-            isRestoring = false; // Clear flag on error
+            isRestoring = false;
             return false;
         }
     }
@@ -424,16 +507,23 @@ document.addEventListener('DOMContentLoaded', function () {
     // Save state before page unload and warn if operations are in progress
     window.addEventListener('beforeunload', (e) => {
         saveExplainerState();
-
-        // Warn user if generation or preview is in progress
         if (generationInProgress || previewLoadingInProgress) {
-            // Modern browsers require returnValue to be set
             e.preventDefault();
-            e.returnValue = ''; // Chrome requires returnValue to be set
-
-            // Return a message (though modern browsers ignore custom messages)
+            e.returnValue = '';
             return 'Explanation generation or preview loading is in progress. Are you sure you want to leave?';
         }
+    });
+
+    // Save state when page becomes hidden (user switches tabs)
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            saveExplainerState();
+        }
+    });
+
+    // Save state on pagehide (more reliable than beforeunload in some browsers)
+    window.addEventListener('pagehide', () => {
+        saveExplainerState();
     });
 
     // Also save state periodically and on key state changes
@@ -448,10 +538,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Only initialize empty state if restore failed (no saved state)
     if (!restored) {
         // Initialize empty state - show results container with count 0
-        const resultsCountNumber = document.getElementById('results-count-number');
-        const selectedCountBadge = document.getElementById('selected-count-badge');
-        if (resultsCountNumber) resultsCountNumber.textContent = '0';
-        if (selectedCountBadge) selectedCountBadge.textContent = '0';
+        updateResultCounts(0, 0);
         explainerResultsContainer.style.display = 'flex';
         const emptyLeft = document.getElementById('explainer-empty-left');
         if (emptyLeft) emptyLeft.style.display = 'none';
@@ -467,27 +554,38 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // --- SEARCH LOGIC WITH ALIASES ---
+    // Helper: Update result counts display
+    function updateResultCounts(resultsCount, selectedCount) {
+        const resultsCountNumber = getElement('results-count-number');
+        const selectedCountBadge = getElement('selected-count-badge');
+        if (resultsCountNumber) resultsCountNumber.textContent = String(resultsCount);
+        if (selectedCountBadge) selectedCountBadge.textContent = String(selectedCount);
+    }
+
+    // Helper: Show empty results state
+    function showEmptyResultsState() {
+        explainerResultsContainer.style.display = 'flex';
+        const emptyLeft = getElement('explainer-empty-left');
+        if (emptyLeft) emptyLeft.style.display = 'none';
+        resultsCount.style.display = 'none';
+        if (!isRestoring) {
+            storedResults = [];
+            renderCheckboxes([]);
+            updateResultCounts(0, 0);
+            updateGenerateButtonState();
+            saveExplainerState();
+        }
+    }
+
     async function searchForExplainer() {
         const keyword = explainerKeyword.value.trim();
-        const emptyLeft = document.getElementById('explainer-empty-left');
-        const resultsCountNumber = document.getElementById('results-count-number');
-        const selectedCountBadge = document.getElementById('selected-count-badge');
+        const emptyLeft = getElement('explainer-empty-left');
 
         if (!keyword) {
-            // Hide query filter container when keyword is empty
             if (queryFilterContainer) {
                 queryFilterContainer.style.display = 'none';
             }
-
-            // Always show results container, even when empty
-            explainerResultsContainer.style.display = 'flex';
-            if (emptyLeft) emptyLeft.style.display = 'none';
-            resultsCount.style.display = 'none';
-            storedResults = [];
-            renderCheckboxes([]);
-            if (resultsCountNumber) resultsCountNumber.textContent = '0';
-            if (selectedCountBadge) selectedCountBadge.textContent = '0';
-            updateGenerateButtonState();
+            showEmptyResultsState();
             return;
         }
 
@@ -604,11 +702,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 explainerResultsContainer.style.display = 'flex';
                 if (emptyLeft) emptyLeft.style.display = 'none';
                 renderCheckboxes([]);
-                if (resultsCountNumber) resultsCountNumber.textContent = '0';
-                if (selectedCountBadge) selectedCountBadge.textContent = '0';
+                updateResultCounts(0, 0);
 
                 // Attach deep search handler
-                const deepSearchBtn = document.getElementById('deep-search-btn');
+                const deepSearchBtn = getElement('deep-search-btn');
                 if (deepSearchBtn) {
                     deepSearchBtn.onclick = () => performDeepSearch(keyword);
                 }
@@ -624,7 +721,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
             // Update count display
             const count = allChoices.length;
-            if (resultsCountNumber) resultsCountNumber.textContent = count.toString();
+            updateResultCounts(count, getSelectedChoices().length);
 
             renderCheckboxes(allChoices);
 
@@ -658,8 +755,7 @@ document.addEventListener('DOMContentLoaded', function () {
             explainerResultsContainer.style.display = 'flex';
             if (emptyLeft) emptyLeft.style.display = 'none';
             renderCheckboxes([]);
-            if (resultsCountNumber) resultsCountNumber.textContent = '0';
-            if (selectedCountBadge) selectedCountBadge.textContent = '0';
+            updateResultCounts(0, 0);
         } finally {
             explainerSearchBtn.disabled = false;
             updateGenerateButtonState();
@@ -981,20 +1077,166 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const docNameSpan = document.createElement('span');
         docNameSpan.className = 'doc-row-name';
-        docNameSpan.textContent = formatDocName(docName);
+        docNameSpan.textContent = docName;
         docNameSpan.title = docName;
+
+        // Find metadata (version, author, date) from storedResults for this document
+        let version = null;
+        let author = null;
+        let date = null;
+
+        if (sections && sections.length > 0 && sections[0].storeItem) {
+            // Try to get metadata from the first section's storeItem
+            const firstStoreItem = sections[0].storeItem;
+            if (firstStoreItem.gdd_version) {
+                version = firstStoreItem.gdd_version;
+            }
+            if (firstStoreItem.gdd_author) {
+                author = firstStoreItem.gdd_author;
+            }
+            if (firstStoreItem.gdd_date) {
+                date = firstStoreItem.gdd_date;
+            }
+        }
+
+        // If not found in storeItem, try to find it from storedResults by doc_name
+        if ((!version || !author || !date) && storedResults && storedResults.length > 0) {
+            const matchingResult = storedResults.find(item => item.doc_name === docName);
+            if (matchingResult) {
+                if (!version && matchingResult.gdd_version) {
+                    version = matchingResult.gdd_version;
+                }
+                if (!author && matchingResult.gdd_author) {
+                    author = matchingResult.gdd_author;
+                }
+                if (!date && matchingResult.gdd_date) {
+                    date = matchingResult.gdd_date;
+                }
+            }
+        }
+
+        // Use actual version if available, otherwise default to "v1.0"
+        let displayVersion = version || 'v1.0';
+
+        // Add "v" prefix if version doesn't start with "v"
+        if (displayVersion && !displayVersion.toLowerCase().startsWith('v')) {
+            displayVersion = 'v' + displayVersion;
+        }
 
         const countSpan = document.createElement('span');
         countSpan.className = 'doc-row-count';
         countSpan.id = `doc-count-${docId}`;
         countSpan.textContent = `(0/${sections.length})`;
+        // Set fixed width to ensure version bubbles align consistently
+        // Width accommodates double-digit counts like "(0/99)"
+        countSpan.style.width = '45px';
+        countSpan.style.textAlign = 'right';
+        countSpan.style.display = 'inline-block';
+        countSpan.style.flexShrink = '0';
 
         docHeader.appendChild(chevron);
         docHeader.appendChild(docCheckbox);
         docHeader.appendChild(fileIcon);
         docHeader.appendChild(docNameSpan);
+
+        // Always add version bubble with lighter green - smaller and aligned
+        const versionBubble = document.createElement('div');
+        versionBubble.textContent = displayVersion;
+        versionBubble.setAttribute('data-version-bubble', 'true'); // For click-outside detection
+        const lightGreen = 'rgb(108, 226, 151)';
+        const darkGreen = '#22c55e';
+        versionBubble.style.cssText = `background-color: ${lightGreen}; color: white; font-size: 0.65rem; font-weight: 600; padding: 2px 6px; border-radius: 9999px; white-space: nowrap; cursor: pointer; margin-left: 16px; margin-right: -14px; display: inline-flex; align-items: center; justify-content: center; height: 18px; line-height: 1; flex-shrink: 0; position: relative;`;
+        versionBubble.onmouseenter = function () { this.style.backgroundColor = darkGreen; };
+        versionBubble.onmouseleave = function () { this.style.backgroundColor = lightGreen; };
+
+        // Create metadata chat bubble (matching provided HTML structure)
+        const metadataBubble = document.createElement('div');
+        metadataBubble.className = 'metadata-chat-bubble';
+        metadataBubble.style.cssText = 'display: none; position: fixed; width: 240px; padding: 20px; background: rgba(248, 248, 248, 0.95); border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); z-index: 99999; align-items: center; line-height: 1.6; flex-direction: column; justify-content: center;';
+
+        // Append to body to ensure it's above everything
+        document.body.appendChild(metadataBubble);
+
+        // Build metadata content matching the provided HTML structure
+        const metadataContent = document.createElement('p');
+        metadataContent.style.cssText = 'font-size: 0.8125rem; color: var(--text-body, #333); display: flex; flex-direction: column; gap: 12px; margin: 0; width: 100%;';
+
+        // Version
+        const versionRow = document.createElement('span');
+        versionRow.style.cssText = 'display: block;';
+        versionRow.innerHTML = `<span style="font-weight: 600; color: var(--text-heading, #1a1a1a);">Version:</span> ${displayVersion}`;
+        metadataContent.appendChild(versionRow);
+
+        // Author
+        const authorRow = document.createElement('span');
+        authorRow.style.cssText = 'display: block;';
+        authorRow.innerHTML = `<span style="font-weight: 600; color: var(--text-heading, #1a1a1a);">Author:</span> ${author || 'N/A'}`;
+        metadataContent.appendChild(authorRow);
+
+        // Date
+        const dateRow = document.createElement('span');
+        dateRow.style.cssText = 'display: block;';
+        dateRow.innerHTML = `<span style="font-weight: 600; color: var(--text-heading, #1a1a1a);">Date:</span> ${date || 'N/A'}`;
+        metadataContent.appendChild(dateRow);
+
+        metadataBubble.appendChild(metadataContent);
+
+        // Function to position the bubble relative to version bubble
+        const positionBubble = () => {
+            const rect = versionBubble.getBoundingClientRect();
+            // Position bottom-left of bubble at top-right of version bubble
+            metadataBubble.style.left = (rect.right + 4) + 'px';
+            metadataBubble.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+        };
+
+        // Toggle chat bubble on click
+        versionBubble.onclick = function (e) {
+            e.stopPropagation(); // Prevent document expansion
+            e.preventDefault(); // Prevent any default behavior
+            // Close all other open bubbles first
+            document.querySelectorAll('.metadata-chat-bubble').forEach(bubble => {
+                if (bubble !== metadataBubble) {
+                    bubble.style.display = 'none';
+                }
+            });
+            // Toggle this bubble
+            const isCurrentlyOpen = metadataBubble.style.display === 'flex';
+            if (!isCurrentlyOpen) {
+                positionBubble();
+                metadataBubble.style.display = 'flex';
+            } else {
+                metadataBubble.style.display = 'none';
+            }
+        };
+
+        // Prevent clicks on the bubble itself from propagating
+        metadataBubble.onclick = function (e) {
+            e.stopPropagation();
+        };
+
+        // Reposition on scroll or resize
+        window.addEventListener('scroll', () => {
+            if (metadataBubble.style.display === 'flex') {
+                positionBubble();
+            }
+        }, true);
+
+        window.addEventListener('resize', () => {
+            if (metadataBubble.style.display === 'flex') {
+                positionBubble();
+            }
+        });
+
+        docHeader.appendChild(versionBubble);
+
         docHeader.appendChild(countSpan);
-        docHeader.onclick = () => toggleDocExpanded(docId);
+        docHeader.onclick = (e) => {
+            // Don't toggle if clicking on version bubble or its chat bubble
+            if (e.target.closest('[data-version-bubble]') || e.target.closest('.metadata-chat-bubble')) {
+                return;
+            }
+            toggleDocExpanded(docId);
+        };
 
         return docHeader;
     }
@@ -1094,6 +1336,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!choices || choices.length === 0) {
             expandedDocs.clear();
             activePreviewId = null;
+            activePreviewDocIds = {}; // Clear all docId mappings when clearing results
             closePreviewPanel();
             return;
         }
@@ -1144,10 +1387,6 @@ document.addEventListener('DOMContentLoaded', function () {
         return Math.abs(hash).toString(36);
     }
 
-    function formatDocName(docName) {
-        // Return full name - CSS handles wrapping when sidebar is extended
-        return docName;
-    }
 
     function toggleDocExpanded(docId) {
         if (expandedDocs.has(docId)) {
@@ -1156,7 +1395,7 @@ document.addEventListener('DOMContentLoaded', function () {
             expandedDocs.add(docId);
         }
 
-        const sectionsContainer = document.getElementById(`sections-${docId}`);
+        const sectionsContainer = getElement(`sections-${docId}`);
         const chevron = document.querySelector(`[data-doc-id="${docId}"] .doc-row-chevron`);
 
         if (sectionsContainer) {
@@ -1171,7 +1410,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function toggleDocumentSelection(docId, selected) {
-        const sectionsContainer = document.getElementById(`sections-${docId}`);
+        const sectionsContainer = getElement(`sections-${docId}`);
         if (!sectionsContainer) return;
 
         const sectionRows = sectionsContainer.querySelectorAll('.section-row');
@@ -1194,14 +1433,16 @@ document.addEventListener('DOMContentLoaded', function () {
         } else {
             row.classList.remove('selected');
         }
-        // Save state after selection changes
-        saveExplainerState();
+        // Save state after selection changes (but not during restore)
+        if (!isRestoring) {
+            saveExplainerState();
+        }
     }
 
     function updateDocCheckboxState(docId) {
-        const docCheckbox = document.getElementById(`doc-checkbox-${docId}`);
-        const countSpan = document.getElementById(`doc-count-${docId}`);
-        const sectionsContainer = document.getElementById(`sections-${docId}`);
+        const docCheckbox = getElement(`doc-checkbox-${docId}`);
+        const countSpan = getElement(`doc-count-${docId}`);
+        const sectionsContainer = getElement(`sections-${docId}`);
 
         if (!sectionsContainer || !docCheckbox) {
             return;
@@ -1246,9 +1487,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Preview functions
     async function togglePreview(sectionId, docName, sectionTitle, content, docId, sectionHeading) {
-        const previewPanel = document.getElementById('section-preview-panel');
+        const previewPanel = getElement('section-preview-panel');
         const explainerRight = document.querySelector('.explainer-right');
-        const previewContent = document.getElementById('preview-content');
+        const previewContent = getElement('preview-content');
 
         if (activePreviewId === sectionId) {
             // Close preview (this will reset previewLoadingInProgress)
@@ -1258,9 +1499,16 @@ document.addEventListener('DOMContentLoaded', function () {
             // Open/switch preview
             activePreviewId = sectionId;
 
+            // Store docId for this sectionId (supports both preview button and citation clicks)
+            if (docId) {
+                activePreviewDocIds[sectionId] = docId;
+            }
+
             // Update preview panel header
-            document.getElementById('preview-doc-name').textContent = docName;
-            document.getElementById('preview-section-title').textContent = sectionTitle;
+            const previewDocNameEl = getElement('preview-doc-name');
+            const previewSectionTitleEl = getElement('preview-section-title');
+            if (previewDocNameEl) previewDocNameEl.textContent = docName;
+            if (previewSectionTitleEl) previewSectionTitleEl.textContent = sectionTitle;
 
             // Show loading state (matching v0 style)
             previewContent.innerHTML = `
@@ -1321,6 +1569,11 @@ document.addEventListener('DOMContentLoaded', function () {
     function closePreviewPanel() {
         const previewPanel = document.getElementById('section-preview-panel');
         const explainerRight = document.querySelector('.explainer-right');
+
+        // Clear the docId mapping for the current preview
+        if (activePreviewId && activePreviewDocIds[activePreviewId]) {
+            delete activePreviewDocIds[activePreviewId];
+        }
 
         activePreviewId = null;
         previewLoadingInProgress = false; // Reset preview loading flag when closing
@@ -1436,6 +1689,210 @@ document.addEventListener('DOMContentLoaded', function () {
         closePreviewBtn.addEventListener('click', closePreviewPanel);
     }
 
+    // Document Viewer Sidebar functions
+    const documentViewerSidebar = document.getElementById('document-viewer-sidebar');
+    const previewFullDocBtn = document.getElementById('preview-full-doc-btn');
+    const closeDocumentViewerBtn = document.getElementById('close-document-viewer-btn');
+
+    async function openDocumentViewer() {
+        if (!documentViewerSidebar) return;
+
+        // Get doc_id from the active preview
+        let docId = null;
+        let docName = 'Document';
+
+        if (activePreviewId) {
+            // First, try to get docId from the activePreviewDocIds map
+            if (activePreviewDocIds[activePreviewId]) {
+                docId = activePreviewDocIds[activePreviewId];
+            } else {
+                // Fallback: Find the section row with the active preview ID
+                const activeRow = document.querySelector(`[data-section-id="${activePreviewId}"]`);
+                if (activeRow) {
+                    const index = parseInt(activeRow.dataset.index);
+                    if (!isNaN(index) && storedResults && storedResults[index]) {
+                        docId = storedResults[index].doc_id;
+                        activePreviewDocIds[activePreviewId] = docId;
+                    }
+                }
+            }
+
+            // Get doc name from preview panel header
+            const previewDocNameEl = document.getElementById('preview-doc-name');
+            if (previewDocNameEl) {
+                docName = previewDocNameEl.textContent;
+            }
+        }
+
+        if (!docId) {
+            console.warn('[Document Viewer] No doc_id found for active preview');
+            // Still open the sidebar but show error message
+            documentViewerSidebar.style.transform = 'translateX(0)';
+            if (previewFullDocBtn) {
+                previewFullDocBtn.classList.add('active');
+            }
+            const content = document.getElementById('document-viewer-content');
+            if (content) {
+                content.innerHTML = `
+                    <div class="placeholder-text" style="text-align: center; padding: 32px;">
+                        <p style="color: var(--status-error);">No document selected for preview.</p>
+                    </div>
+                `;
+            }
+            return;
+        }
+
+        // Update document name in sidebar
+        const docNameEl = document.getElementById('document-viewer-doc-name');
+        if (docNameEl) {
+            docNameEl.textContent = docName;
+        }
+
+        // Show loading state
+        const content = document.getElementById('document-viewer-content');
+        if (content) {
+            content.style.display = 'flex';
+            content.style.alignItems = 'center';
+            content.style.justifyContent = 'center';
+            content.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; gap: 12px;">
+                    <div class="spinner" style="width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                    <p style="font-size: 0.875rem; color: var(--muted-foreground); margin: 0;">Loading document...</p>
+                </div>
+            `;
+        }
+
+        // Open the sidebar
+        documentViewerSidebar.style.transform = 'translateX(0)';
+        if (previewFullDocBtn) {
+            previewFullDocBtn.classList.add('active');
+        }
+
+        // Fetch PDF URL
+        try {
+            const response = await fetch('/api/gdd/explainer/get-pdf-url', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ doc_id: docId })
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.pdf_url) {
+                // Display PDF in iframe - ensure it takes full height
+                // Add #toolbar=0 to hide the PDF viewer toolbar (download, print, menu icons)
+                const pdfUrlWithParams = result.pdf_url.includes('#')
+                    ? result.pdf_url.replace(/#.*$/, '') + '#toolbar=0&navpanes=0'
+                    : result.pdf_url + '#toolbar=0&navpanes=0';
+
+                if (content) {
+                    content.style.display = 'block';
+                    content.style.alignItems = 'stretch';
+                    content.style.justifyContent = 'stretch';
+                    content.innerHTML = `
+                        <iframe src="${pdfUrlWithParams}" width="100%" height="100%" style="border: none; display: block; flex: 1; min-height: 0;"></iframe>
+                    `;
+                    saveExplainerState(); // Save state after PDF is loaded
+                }
+            } else {
+                // Show error message
+                if (content) {
+                    content.style.display = 'flex';
+                    content.style.alignItems = 'center';
+                    content.style.justifyContent = 'center';
+                    content.innerHTML = `
+                        <div class="placeholder-text" style="text-align: center; padding: 32px;">
+                            <p style="color: var(--status-error); margin-bottom: 12px;">No PDF found for this document.</p>
+                            <p style="color: var(--muted-foreground); font-size: 0.875rem;">${result.error || 'The document PDF is not available in Supabase Storage.'}</p>
+                        </div>
+                    `;
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching document PDF:', error);
+            if (content) {
+                content.style.display = 'flex';
+                content.style.alignItems = 'center';
+                content.style.justifyContent = 'center';
+                content.innerHTML = `
+                    <div class="placeholder-text" style="text-align: center; padding: 32px;">
+                        <p style="color: var(--status-error);">Error: ${error.message || 'Failed to load document'}</p>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    function closeDocumentViewer() {
+        if (documentViewerSidebar) {
+            documentViewerSidebar.style.transform = 'translateX(100%)';
+            if (previewFullDocBtn) {
+                previewFullDocBtn.classList.remove('active');
+            }
+            saveExplainerState(); // Save state when viewer closes
+        }
+    }
+
+    // Initialize document viewer buttons
+    if (previewFullDocBtn) {
+        previewFullDocBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (isDocumentViewerOpen()) {
+                closeDocumentViewer();
+            } else {
+                openDocumentViewer();
+            }
+        });
+    }
+
+    if (closeDocumentViewerBtn) {
+        closeDocumentViewerBtn.addEventListener('click', closeDocumentViewer);
+    }
+
+    // Note: We don't need stopPropagation here because we check contains() in the click-outside handler
+    // This allows the click-outside handler to work properly
+
+    // Helper function to check if document viewer is open
+    function isDocumentViewerOpen() {
+        if (!documentViewerSidebar) return false;
+        // Check inline style first (most reliable)
+        if (documentViewerSidebar.style.transform === 'translateX(0)') {
+            return true;
+        }
+        // Fallback: check computed style
+        const computedStyle = window.getComputedStyle(documentViewerSidebar);
+        const transform = computedStyle.transform;
+        // When open: translateX(0) becomes matrix(1, 0, 0, 1, 0, 0) or 'none'
+        // When closed: translateX(100%) becomes matrix(1, 0, 0, 1, 600, 0) or similar (600px is sidebar width)
+        if (transform === 'none' || transform === 'matrix(1, 0, 0, 1, 0, 0)') {
+            return true;
+        }
+        // Check if transform indicates sidebar is visible (not translated 100% to the right)
+        if (transform.includes('matrix')) {
+            // Extract the X translation value (5th value in matrix)
+            const match = transform.match(/matrix\([^,]+,\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*([^,]+)/);
+            if (match) {
+                const translateX = parseFloat(match[1]);
+                // If translateX is 0 or close to 0, sidebar is open
+                return Math.abs(translateX) < 10;
+            }
+        }
+        return false;
+    }
+
+    // Close document viewer when clicking outside
+    document.addEventListener('click', (e) => {
+        if (isDocumentViewerOpen()) {
+            const isInsideViewer = documentViewerSidebar && documentViewerSidebar.contains(e.target);
+            const isButton = previewFullDocBtn && previewFullDocBtn.contains(e.target);
+
+            if (!isInsideViewer && !isButton) {
+                closeDocumentViewer();
+                saveExplainerState();
+            }
+        }
+    }, true); // Use capture phase to catch events earlier
+
     function handleSelectAll() {
         if (selectAllCheckbox.checked) {
             selectNoneCheckbox.checked = false;
@@ -1457,6 +1914,7 @@ document.addEventListener('DOMContentLoaded', function () {
             });
 
             updateGenerateButtonState();
+            saveExplainerState(); // Save state after selection changes
         } else {
             // When "All" is unchecked, uncheck all sections
             const sectionRows = explainerResultsCheckboxes.querySelectorAll('.section-row');
@@ -1475,6 +1933,7 @@ document.addEventListener('DOMContentLoaded', function () {
             });
 
             updateGenerateButtonState();
+            saveExplainerState(); // Save state after selection changes
         }
     }
 
@@ -1499,6 +1958,7 @@ document.addEventListener('DOMContentLoaded', function () {
             });
 
             updateGenerateButtonState();
+            saveExplainerState(); // Save state after selection changes
         }
     }
 
@@ -1514,7 +1974,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
         try {
             generationInProgress = true; // Mark generation as in progress
-            console.log('[Explainer] Starting generation, setting generationInProgress = true');
             saveExplainerState(); // Save state immediately
 
             explainBtn.disabled = true;
@@ -1548,31 +2007,31 @@ document.addEventListener('DOMContentLoaded', function () {
                 explanationKeyword = foundAliasKW.name;
             }
 
-            // Collect selected keywords from filter checkboxes
-            let selectedKeywords = [explanationKeyword]; // Default to original keyword
+            // Always collect both original and translation keywords (if translation exists)
+            // Language toggle only affects output language, not which keywords are queried
+            // ALWAYS search with both keywords regardless of checkbox state or language toggle
+            let selectedKeywords = [explanationKeyword]; // Start with the keyword user searched
 
-            if (translationInfo) {
-                const enChecked = queryCheckboxEn ? queryCheckboxEn.checked : true;
-                const vnChecked = queryCheckboxVn ? queryCheckboxVn.checked : false;
-                const vnEnabled = queryCheckboxVn ? !queryCheckboxVn.disabled : false;
-
-                selectedKeywords = [];
-
-                // Add original keyword if EN checkbox is checked
-                if (enChecked && translationInfo.original) {
-                    selectedKeywords.push(translationInfo.original);
-                }
-
-                // Add translated keyword if VN checkbox is checked and enabled
-                if (vnChecked && vnEnabled && translationInfo.translation) {
-                    selectedKeywords.push(translationInfo.translation);
-                }
-
-                // If neither is checked, default to original keyword
-                if (selectedKeywords.length === 0) {
-                    selectedKeywords = [explanationKeyword];
+            // If translation info exists, always add the translation keyword
+            // This ensures we search with BOTH the original keyword AND its translation
+            if (translationInfo && translationInfo.translation && translationInfo.translation.trim()) {
+                const translation = translationInfo.translation.trim();
+                // Only add if it's different from the original keyword (avoid duplicates)
+                if (translation.toLowerCase() !== explanationKeyword.trim().toLowerCase()) {
+                    selectedKeywords.push(translation);
                 }
             }
+
+            // Debug logging to console
+            console.log('='.repeat(100));
+            console.log('[EXPLAINER] ===== KEYWORD SELECTION DEBUG =====');
+            console.log('[EXPLAINER] User searched keyword:', keyword);
+            console.log('[EXPLAINER] Explanation keyword (after alias resolution):', explanationKeyword);
+            console.log('[EXPLAINER] Translation info:', translationInfo);
+            console.log('[EXPLAINER] Selected keywords to query:', selectedKeywords);
+            console.log('[EXPLAINER] Language toggle (output language only):', selectedLanguage);
+            console.log('[EXPLAINER] Number of selected choices:', selectedChoices.length);
+            console.log('='.repeat(100));
 
             const requestBody = JSON.stringify({
                 keyword: explanationKeyword,
@@ -2364,8 +2823,10 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
 
-        // Save state after filter changes
-        saveExplainerState();
+        // Save state after filter changes (but not during restore)
+        if (!isRestoring) {
+            saveExplainerState();
+        }
     }
 });
 

@@ -277,17 +277,21 @@ def _explain_single_section(
     hyde_query: str,
     doc_name_map: Dict[str, str],
     detected_language: str,
+    all_keywords: List[str] = None,
+    hyde_queries: Dict[str, str] = None,
 ) -> Dict[str, Any]:
     """
     Generate explanation for a single section.
 
     Args:
-        keyword: Original keyword query
+        keyword: Primary keyword query (for display)
         doc_id: Document ID
         section_heading: Section heading (can be None)
-        hyde_query: HYDE-expanded query
+        hyde_query: HYDE-expanded query (from primary keyword, for backward compatibility)
         doc_name_map: Mapping of doc_id to document name
         detected_language: Detected language ('english' or 'vietnamese')
+        all_keywords: List of all keywords to search with (primary + additional). If None, uses keyword only.
+        hyde_queries: Dict mapping original keyword -> HYDE-expanded query. If None, uses hyde_query for all.
 
     Returns:
         Dict with 'explanation', 'source_chunks', 'citations', 'error', etc.
@@ -305,17 +309,108 @@ def _explain_single_section(
             }
 
         # Get keyword-matched chunks for relevance scoring
-        matched_chunks = keyword_search(
-            hyde_query, limit=20, doc_id_filter=doc_id)
-        matched_in_section = [
-            c for c in matched_chunks
-            if c.get('section_heading') == section_heading or
-            (section_heading is None and c.get('section_heading') is None)
-        ]
-
-        # Create a relevance map from matched chunks
-        relevance_map = {c.get('chunk_id'): c.get('relevance', 0.0)
-                         for c in matched_in_section}
+        # Search with all keywords and combine results (take max relevance for each chunk)
+        relevance_map = {}
+        keywords_to_search = all_keywords if all_keywords and len(all_keywords) > 0 else [keyword]
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("=" * 100)
+        logger.info(f"[EXPLAIN SINGLE SECTION] ===== KEYWORD SEARCH DEBUG =====")
+        logger.info(f"[EXPLAIN SINGLE SECTION] doc_id={doc_id}, section={section_heading}")
+        logger.info(f"[EXPLAIN SINGLE SECTION] Primary keyword: '{keyword}'")
+        logger.info(f"[EXPLAIN SINGLE SECTION] All keywords to search: {keywords_to_search}")
+        logger.info(f"[EXPLAIN SINGLE SECTION] HYDE queries available: {hyde_queries if hyde_queries else 'None'}")
+        logger.info("=" * 100)
+        
+        keyword_results_summary = {}  # Track results per keyword for debugging
+        
+        for search_keyword in keywords_to_search:
+            logger.info("-" * 100)
+            logger.info(f"[EXPLAIN SINGLE SECTION] Processing keyword: '{search_keyword}'")
+            
+            # Use HYDE-expanded query if available, otherwise use original keyword
+            if hyde_queries and search_keyword in hyde_queries:
+                search_query = hyde_queries[search_keyword]
+                logger.info(f"[EXPLAIN SINGLE SECTION] Using HYDE-expanded query for '{search_keyword}': '{search_query}'")
+            else:
+                # Fallback: use primary HYDE query for primary keyword, direct search for others
+                search_query = hyde_query if search_keyword.strip() == keyword.strip() else search_keyword.strip()
+                logger.info(f"[EXPLAIN SINGLE SECTION] Using query for '{search_keyword}': '{search_query}' (no HYDE expansion available)")
+            
+            logger.info(f"[EXPLAIN SINGLE SECTION] Calling keyword_search with query='{search_query}', doc_id_filter='{doc_id}', limit=20")
+            matched_chunks = keyword_search(
+                search_query, limit=20, doc_id_filter=doc_id)
+            
+            logger.info(f"[EXPLAIN SINGLE SECTION] keyword_search returned {len(matched_chunks)} total chunks for query '{search_query}'")
+            
+            # CRITICAL DEBUG: Log if no results or all relevance is 0.0
+            if len(matched_chunks) == 0:
+                logger.error(f"[EXPLAIN SINGLE SECTION] ⚠️ NO RESULTS for keyword '{search_keyword}' (query: '{search_query}')")
+            else:
+                relevances = [c.get('relevance', 0.0) for c in matched_chunks if c.get('relevance') is not None]
+                if relevances:
+                    max_rel = max(relevances)
+                    count_above_zero = sum(1 for r in relevances if r > 0.0)
+                    logger.info(f"[EXPLAIN SINGLE SECTION] Relevance stats for '{search_keyword}': max={max_rel:.4f}, count>0={count_above_zero}/{len(relevances)}")
+                    if max_rel == 0.0:
+                        logger.error(f"[EXPLAIN SINGLE SECTION] ⚠️ ALL RELEVANCE SCORES ARE 0.0 for keyword '{search_keyword}' (query: '{search_query}')")
+                        logger.error(f"[EXPLAIN SINGLE SECTION] This suggests the keyword_search_documents RPC function found no matches")
+                else:
+                    logger.error(f"[EXPLAIN SINGLE SECTION] ⚠️ NO RELEVANCE SCORES in results for keyword '{search_keyword}'")
+            
+            # Log relevance scores for debugging
+            if matched_chunks:
+                logger.info(f"[EXPLAIN SINGLE SECTION] Relevance scores for '{search_query}':")
+                for idx, c in enumerate(matched_chunks[:5]):  # Show first 5
+                    chunk_id = c.get('chunk_id', 'N/A')
+                    relevance = c.get('relevance', 0.0)
+                    section = c.get('section_heading', 'N/A')
+                    logger.info(f"  [{idx+1}] chunk_id={chunk_id}, relevance={relevance}, section={section}")
+            
+            matched_in_section = [
+                c for c in matched_chunks
+                if c.get('section_heading') == section_heading or
+                (section_heading is None and c.get('section_heading') is None)
+            ]
+            
+            logger.info(f"[EXPLAIN SINGLE SECTION] After filtering by section '{section_heading}': {len(matched_in_section)} chunks match")
+            
+            # Track results for this keyword
+            keyword_results_summary[search_keyword] = {
+                'total_chunks': len(matched_chunks),
+                'matched_in_section': len(matched_in_section),
+                'relevance_scores': [c.get('relevance', 0.0) for c in matched_in_section[:10]]
+            }
+            
+            # Update relevance map with max relevance for each chunk
+            chunks_updated = 0
+            for c in matched_in_section:
+                chunk_id = c.get('chunk_id')
+                if chunk_id:
+                    current_relevance = relevance_map.get(chunk_id, 0.0)
+                    new_relevance = c.get('relevance', 0.0)
+                    old_relevance = current_relevance
+                    # Take maximum relevance across all keyword searches
+                    relevance_map[chunk_id] = max(current_relevance, new_relevance)
+                    if relevance_map[chunk_id] != old_relevance:
+                        chunks_updated += 1
+                        logger.info(f"[EXPLAIN SINGLE SECTION] Updated relevance for chunk_id={chunk_id}: {old_relevance} -> {relevance_map[chunk_id]} (from keyword '{search_keyword}')")
+            
+            logger.info(f"[EXPLAIN SINGLE SECTION] Updated {chunks_updated} chunk relevance scores from keyword '{search_keyword}'")
+        
+        logger.info("-" * 100)
+        logger.info(f"[EXPLAIN SINGLE SECTION] ===== RELEVANCE MAP SUMMARY =====")
+        logger.info(f"[EXPLAIN SINGLE SECTION] Total chunks in relevance_map: {len(relevance_map)}")
+        if relevance_map:
+            sorted_relevance = sorted(relevance_map.items(), key=lambda x: x[1], reverse=True)
+            logger.info(f"[EXPLAIN SINGLE SECTION] Top 10 chunks by relevance:")
+            for idx, (chunk_id, rel) in enumerate(sorted_relevance[:10]):
+                logger.info(f"  [{idx+1}] chunk_id={chunk_id}, relevance={rel}")
+        logger.info(f"[EXPLAIN SINGLE SECTION] Keyword results summary:")
+        for kw, summary in keyword_results_summary.items():
+            logger.info(f"  '{kw}': {summary['matched_in_section']} chunks in section, relevance range: {min(summary['relevance_scores']) if summary['relevance_scores'] else 0.0:.4f} - {max(summary['relevance_scores']) if summary['relevance_scores'] else 0.0:.4f}")
+        logger.info("=" * 100)
 
         # Combine section chunks with relevance scores
         chunks_with_relevance = []
@@ -337,15 +432,40 @@ def _explain_single_section(
         relevant_chunks = [
             c for c in chunks_with_relevance if c.get('relevance', 0.0) > 0.0]
 
+        logger.info(f"[EXPLAIN SINGLE SECTION] ===== CHUNK SELECTION =====")
+        logger.info(f"[EXPLAIN SINGLE SECTION] Total chunks in section: {len(section_chunks)}")
+        logger.info(f"[EXPLAIN SINGLE SECTION] Chunks with relevance > 0.0: {len(relevant_chunks)}")
+        
+        # CRITICAL DEBUG: Show why no chunks were found
+        if len(relevant_chunks) == 0:
+            logger.error("=" * 100)
+            logger.error(f"[EXPLAIN SINGLE SECTION] ⚠️⚠️⚠️ CRITICAL: NO CHUNKS WITH RELEVANCE > 0.0 ⚠️⚠️⚠️")
+            logger.error(f"[EXPLAIN SINGLE SECTION] Section: {section_heading}, doc_id: {doc_id}")
+            logger.error(f"[EXPLAIN SINGLE SECTION] Keywords searched: {keywords_to_search}")
+            logger.error(f"[EXPLAIN SINGLE SECTION] Relevance map size: {len(relevance_map)}")
+            if relevance_map:
+                logger.error(f"[EXPLAIN SINGLE SECTION] Relevance map values: {list(relevance_map.values())[:10]}")
+                logger.error(f"[EXPLAIN SINGLE SECTION] Max relevance in map: {max(relevance_map.values()) if relevance_map.values() else 0.0}")
+            else:
+                logger.error(f"[EXPLAIN SINGLE SECTION] Relevance map is EMPTY - keyword_search returned no matches!")
+            logger.error(f"[EXPLAIN SINGLE SECTION] This means keyword_search_documents RPC found NO matches for any keyword")
+            logger.error("=" * 100)
+        
         if relevant_chunks:
             # Sort by relevance (descending), then by chunk_index
             relevant_chunks.sort(
                 key=lambda x: (-x.get('relevance', 0.0), x.get('chunk_index', 0)))
             # Limit chunks per section to avoid token overflow (max 10 chunks per section)
             selected_chunks = relevant_chunks[:10]
+            logger.info(f"[EXPLAIN SINGLE SECTION] Selected {len(selected_chunks)} chunks (from {len(relevant_chunks)} relevant chunks)")
+            logger.info(f"[EXPLAIN SINGLE SECTION] Selected chunk relevance scores: {[c.get('relevance', 0.0) for c in selected_chunks]}")
         else:
             # Fallback: use first few chunks if no keyword matches
             selected_chunks = chunks_with_relevance[:5]
+            logger.warning(f"[EXPLAIN SINGLE SECTION] No relevant chunks found (relevance > 0.0), using fallback: {len(selected_chunks)} chunks")
+            logger.warning(f"[EXPLAIN SINGLE SECTION] Fallback chunks have relevance scores: {[c.get('relevance', 0.0) for c in selected_chunks]}")
+        
+        logger.info("=" * 100)
 
         if not selected_chunks:
             return {
@@ -394,16 +514,33 @@ def _explain_single_section(
         else:
             language_instruction = "IMPORTANT: Respond in English. Your entire answer must be in English."
 
+        # Build keyword list for prompt (primary + all additional keywords)
+        # Collect all unique keywords (primary + additional)
+        keyword_list = [keyword.strip()] if keyword and keyword.strip() else []
+        if all_keywords:
+            for kw in all_keywords:
+                if kw and kw.strip() and kw.strip() not in [k.strip().lower() for k in keyword_list]:
+                    keyword_list.append(kw.strip())
+        
+        # Create display string for prompt
+        if len(keyword_list) > 1:
+            keyword_display = f"{keyword_list[0]} (or its translation: {', '.join(keyword_list[1:])})"
+        elif len(keyword_list) == 1:
+            keyword_display = keyword_list[0]
+        else:
+            keyword_display = keyword  # Fallback
+        
         # Build prompt (same format as before, but for single section)
-        prompt = f"""Based on the following document chunks, provide a detailed explanation for: {keyword}
+        prompt = f"""Based on the following document chunks, provide a detailed explanation for: {keyword_display}
 
 {language_instruction}
 
 FOCUS REQUIREMENT:
-- Focus ONLY on information directly related to: {keyword}
-- If a chunk does not contain information about {keyword}, SKIP IT ENTIRELY. Do NOT include it in your response.
+- Focus ONLY on information directly related to: {keyword_display}
+- The keyword may appear in the document as: {', '.join(keyword_list)}
+- If a chunk does not contain information about any of these keywords ({', '.join(keyword_list)}), SKIP IT ENTIRELY. Do NOT include it in your response.
 - Do NOT explain chunks that are irrelevant to the keyword query.
-- Only include information that is directly relevant to explaining {keyword}.
+- Only include information that is directly relevant to explaining {keyword_display}.
 - Do NOT include any statements about missing information such as "The document does not specify this" or "The document does not provide information about X".
 
 Note:
@@ -426,7 +563,7 @@ OUTPUT FORMAT REQUIREMENTS:
 - After the section title, add a blank line, then write a paragraph explaining that chunk's content.
 - Each section must be separated by a blank line.
 - Do NOT combine multiple chunks into one section.
-- Only explain chunks that contain information relevant to {keyword}. If a chunk is irrelevant, SKIP IT COMPLETELY - do not include it in your response at all.
+- Only explain chunks that contain information relevant to {keyword_display} (or any of its translations: {', '.join(keyword_list)}). If a chunk is irrelevant, SKIP IT COMPLETELY - do not include it in your response at all.
 
 EXAMPLE OUTPUT FORMAT:
 1. Tank Stats
@@ -530,30 +667,48 @@ def explain_keyword(
     selected_items: List[Dict[str, str]],
     use_hyde: bool = True,
     language: str = None,
+    additional_keywords: List[str] = None,
 ) -> Dict[str, Any]:
     """
     Generate detailed explanation for a keyword from selected documents/sections.
     Processes each section separately and combines the results.
 
     Args:
-        keyword: Keyword/query to explain
+        keyword: Primary keyword/query to explain
         selected_items: List of dicts with 'doc_id' and optional 'section_heading'
         use_hyde: Whether to use HYDE query expansion
         language: Language preference ('en' or 'vn'). If None, auto-detects from keyword.
+        additional_keywords: Additional keywords to search with (e.g., translation). All keywords will be queried.
 
     Returns:
         Dict with 'explanation', 'source_chunks', 'hyde_query', 'language', etc.
     """
     try:
-        # Step 1: HYDE query expansion (optional)
-        hyde_query = keyword
+        # Step 1: HYDE query expansion for ALL keywords (optional)
+        # Collect all keywords to expand (primary + additional)
+        all_keywords_to_expand = [keyword]
+        if additional_keywords:
+            all_keywords_to_expand.extend(additional_keywords)
+        
+        # Expand all keywords with HYDE
+        hyde_queries = {}  # Map original keyword -> expanded query
         hyde_timing = {}
         hyde_expansion_time = 0.0
+        
         if use_hyde:
             hyde_start_time = time.perf_counter()
-            hyde_query, hyde_timing = hyde_expand_query(keyword)
+            for kw in all_keywords_to_expand:
+                expanded, timing = hyde_expand_query(kw)
+                hyde_queries[kw] = expanded
+                # Accumulate timing (use max or sum, here using sum for total time)
+                if timing:
+                    hyde_expansion_time += timing.get('total_time', 0.0)
             hyde_end_time = time.perf_counter()
             hyde_expansion_time = round(hyde_end_time - hyde_start_time, 2)
+            hyde_timing = {'total_time': hyde_expansion_time}
+        
+        # Primary HYDE query (for backward compatibility and display)
+        hyde_query = hyde_queries.get(keyword, keyword)
 
         # Step 2: Group selected items by unique (doc_id, section_heading) combinations
         unique_sections = []
@@ -641,15 +796,22 @@ def explain_keyword(
         sorted_sections = sorted(chunks_by_section.items(),
                                  key=lambda x: x[1][0].get('chunk_id', '') or '' if x[1] else '')
 
+        # Collect all keywords to query (primary + additional)
+        all_keywords = [keyword]
+        if additional_keywords:
+            all_keywords.extend([kw for kw in additional_keywords if kw and kw.strip() and kw.strip() != keyword.strip()])
+        
         for (doc_id, section_heading), section_chunks in sorted_sections:
-            # Process this section
+            # Process this section with all keywords
             result = _explain_single_section(
                 keyword=keyword,
                 doc_id=doc_id,
                 section_heading=section_heading,
                 hyde_query=hyde_query,
                 doc_name_map=doc_name_map,
-                detected_language=detected_language
+                detected_language=detected_language,
+                all_keywords=all_keywords,
+                hyde_queries=hyde_queries  # Pass all HYDE-expanded queries
             )
 
             if result.get('error'):

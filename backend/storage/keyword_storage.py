@@ -291,6 +291,51 @@ def get_all_keywords() -> List[str]:
     return sorted(keywords)
 
 
+def update_document_metadata(
+    doc_id: str,
+    version: Optional[str] = None,
+    author: Optional[str] = None,
+    date: Optional[str] = None
+) -> bool:
+    """
+    Update GDD metadata fields for a document.
+    Handles null cases - if a field is None, it will be set to NULL in the database.
+    
+    Args:
+        doc_id: Document ID
+        version: Optional version string (e.g., "v1.5", "1.1")
+        author: Optional author string (e.g., "phucth12", "QuocTA")
+        date: Optional date string (e.g., "28 - 07 - 2025")
+    
+    Returns:
+        True if update was successful, False otherwise
+    """
+    try:
+        client = get_supabase_client(use_service_key=True)
+        
+        # Build update dict - only include non-None values
+        update_data = {}
+        if version is not None:
+            update_data['gdd_version'] = version.strip() if version else None
+        if author is not None:
+            update_data['gdd_author'] = author.strip() if author else None
+        if date is not None:
+            update_data['gdd_date'] = date.strip() if date else None
+        
+        # Only update if we have something to update
+        if not update_data:
+            return False
+        
+        result = client.table('keyword_documents').update(update_data).eq('doc_id', doc_id).execute()
+        
+        return result.data is not None
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error updating document metadata for {doc_id}: {e}")
+        return False
+
+
 def list_aliases_grouped() -> Dict[str, Dict[str, Any]]:
     """
     List all aliases grouped by keyword (for frontend display).
