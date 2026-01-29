@@ -359,11 +359,15 @@ def upload_and_index_document_bytes(pdf_bytes: bytes, original_filename: str, pr
 
     temp_dir = tempfile.mkdtemp(prefix="gdd_upload_")
     try:
-        pdf_path = Path(temp_dir) / \
-            secure_filename(original_filename).replace(" ", "_")
+        pdf_path = Path(temp_dir) / secure_filename(original_filename).replace(" ", "_")
         pdf_path.write_bytes(pdf_bytes)
+        # Use the same pipeline as the CLI script (index_pdf_with_marker --file ... --debug)
         result = index_pdf_with_marker(
-            pdf_path, dry_run=False, progress_cb=progress_cb)
+            pdf_path,
+            dry_run=False,
+            progress_cb=progress_cb,
+            debug=True,
+        )
         return result
     finally:
         try:

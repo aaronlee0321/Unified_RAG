@@ -188,19 +188,34 @@ def index_pdf_with_marker(
         markdown_content = md_path.read_text(
             encoding="utf-8", errors="replace")
 
+        # Prefer the standard Marker layout: <marker_dir>/images/*
         images_dir = marker_dir / "images"
-        image_paths = list(images_dir.glob("*")) if images_dir.exists() else []
-        image_paths = [p for p in image_paths if p.is_file()]
-        logger.info(
-            "[Marker images] images_dir.exists=%s, image_count=%d, filenames=%s",
-            images_dir.exists(),
-            len(image_paths),
-            [p.name for p in image_paths],
-        )
-        if not images_dir.exists():
-            logger.warning(
-                "[Marker images] No images/ folder under %s (Marker may skip images in some environments; see https://github.com/datalab-to/marker)",
-                marker_dir,
+        if images_dir.exists():
+            image_paths = [p for p in images_dir.glob("*") if p.is_file()]
+            logger.info(
+                "[Marker images] Using images/ folder. image_count=%d, filenames=%s",
+                len(image_paths),
+                [p.name for p in image_paths],
+            )
+        else:
+            # Fallback: some Marker versions / configurations emit images directly into marker_dir
+            # (e.g. _page_*.jpeg, pdf_page_*.png, layout_page_*.png). Treat only the "content"
+            # images as assets for Supabase, and skip debug / page-render artifacts.
+            all_files = [p for p in marker_dir.iterdir() if p.is_file()]
+            image_paths = []
+            for p in all_files:
+                name_lower = p.name.lower()
+                if not any(name_lower.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp")):
+                    continue
+                # Skip obvious debug / full-page renders; keep cropped content images like _page_*.jpeg
+                if name_lower.startswith("layout_page_") or name_lower.startswith("pdf_page_"):
+                    continue
+                image_paths.append(p)
+
+            logger.info(
+                "[Marker images] No images/ folder. Using fallback files in marker_dir. image_count=%d, filenames=%s",
+                len(image_paths),
+                [p.name for p in image_paths],
             )
 
         # 3) Upload images to gdd_pdfs/{doc_id}/images/ and build metadata + URL map

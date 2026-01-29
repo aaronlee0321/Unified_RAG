@@ -7,14 +7,22 @@ Used by index_pdf_with_marker and convert_pdf_to_markdown.
 import logging
 import shutil
 import subprocess
+import threading
+import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 logger = logging.getLogger(__name__)
 
 
-def run_marker(pdf_path: Path, output_dir: Path, debug: bool = False) -> Tuple[bool, str]:
+def run_marker(
+    pdf_path: Path,
+    output_dir: Path,
+    debug: bool = False,
+    progress_cb: Optional[Callable[[str], None]] = None,
+    heartbeat_seconds: float = 5.0,
+) -> Tuple[bool, str]:
     """
     Run Marker CLI: marker_single <pdf_path> --output_format markdown --output_dir <output_dir>.
     Image extraction is enabled by default (do not pass --disable_image_extraction).
@@ -36,19 +44,59 @@ def run_marker(pdf_path: Path, output_dir: Path, debug: bool = False) -> Tuple[b
         if debug:
             cmd.append("--debug")
         logger.info("Running: %s", " ".join(cmd))
-        r = subprocess.run(
+
+        # Start Marker and stream output (when it exists). Some Marker runs emit little/no newline
+        # output for long stretches; in that case, emit heartbeat messages to progress_cb so the UI
+        # doesn't look frozen.
+        p = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=900,
+            bufsize=1,
             cwd=str(PROJECT_ROOT),
         )
-        if r.stdout and r.stdout.strip():
-            logger.info("[Marker stdout] %s", r.stdout.strip()[:2000])
-        if r.stderr and r.stderr.strip():
-            logger.info("[Marker stderr] %s", r.stderr.strip()[:2000])
-        if r.returncode != 0:
-            return False, (r.stderr or r.stdout or f"exit code {r.returncode}")
+
+        start = time.time()
+        stop_event = threading.Event()
+
+        def heartbeat() -> None:
+            if not callable(progress_cb):
+                return
+            # Emit periodically until process exits.
+            while not stop_event.wait(timeout=heartbeat_seconds):
+                elapsed = int(time.time() - start)
+                progress_cb(f"Marker still running… ({elapsed}s)")
+
+        hb_thread = None
+        if callable(progress_cb) and heartbeat_seconds and heartbeat_seconds > 0:
+            hb_thread = threading.Thread(target=heartbeat, daemon=True)
+            hb_thread.start()
+
+        output_lines = []
+        assert p.stdout is not None
+        for raw_line in iter(p.stdout.readline, ""):
+            line = raw_line.rstrip()
+            if not line:
+                continue
+            output_lines.append(line)
+            logger.info("[Marker] %s", line[:2000])
+            if callable(progress_cb):
+                # Also forward real lines (throttling not critical; UI should handle).
+                progress_cb(f"Marker: {line[:160]}")
+
+        try:
+            p.wait(timeout=900)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            return False, "Marker timed out (900s)"
+        finally:
+            stop_event.set()
+
+        if p.returncode != 0:
+            tail = "\n".join(output_lines[-40:])
+            return False, (tail or f"exit code {p.returncode}")
+
         return True, ""
     except subprocess.TimeoutExpired:
         return False, "Marker timed out (900s)"
