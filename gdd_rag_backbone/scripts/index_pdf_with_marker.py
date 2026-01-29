@@ -10,6 +10,7 @@ See https://github.com/datalab-to/marker (e.g. TORCH_DEVICE, --debug, CPU/GPU be
 
 Usage (from project root with venv activated):
     python -m gdd_rag_backbone.scripts.index_pdf_with_marker --file "path/to/document.pdf" [--dry-run]
+    python -m gdd_rag_backbone.scripts.index_pdf_with_marker --file "path/to/document.pdf" --debug  # Marker debug (layout images, JSON)
 """
 
 from werkzeug.utils import secure_filename
@@ -130,6 +131,7 @@ def index_pdf_with_marker(
     pdf_path: Path,
     dry_run: bool = False,
     progress_cb: Optional[Callable[[str], None]] = None,
+    debug: bool = False,
 ) -> Dict[str, Any]:
     """
     Convert a PDF to Markdown with Marker, upload images to gdd_pdfs/{doc_id}/images/,
@@ -161,9 +163,9 @@ def index_pdf_with_marker(
     with tempfile.TemporaryDirectory(prefix="marker_out_") as temp_dir:
         out_dir = Path(temp_dir)
 
-        # 1) Run Marker
-        bump("Converting PDF with Marker")
-        ok, err = run_marker(pdf_path, out_dir)
+        # 1) Run Marker (--debug saves per-page layout images and JSON for troubleshooting)
+        bump("Converting PDF with Marker" + (" (debug)" if debug else ""))
+        ok, err = run_marker(pdf_path, out_dir, debug=debug)
         if not ok:
             return {"status": "error", "message": f"Marker failed: {err}"}
 
@@ -306,8 +308,14 @@ def main():
         action="store_true",
         help="Only print what would be done",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Pass --debug to Marker (saves per-page layout images and JSON; useful for image extraction issues)",
+    )
     args = parser.parse_args()
-    result = index_pdf_with_marker(args.file, dry_run=args.dry_run)
+    result = index_pdf_with_marker(
+        args.file, dry_run=args.dry_run, debug=args.debug)
     print(result.get("message", result))
     if result.get("status") == "error":
         raise SystemExit(1)
