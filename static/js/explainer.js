@@ -1485,6 +1485,75 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    /**
+     * Extract image URLs from chunk content (markdown image syntax ![...](url)).
+     * @param {string} content - Raw chunk text
+     * @returns {string[]} Array of image URLs
+     */
+    function extractImageUrlsFromContent(content) {
+        if (!content || typeof content !== 'string') return [];
+        const urls = [];
+        const re = /!\[[^\]]*\]\(([^)]+)\)/g;
+        let m;
+        while ((m = re.exec(content)) !== null) {
+            const url = m[1].trim();
+            if (url && !urls.includes(url)) urls.push(url);
+        }
+        return urls;
+    }
+
+    /**
+     * Update prev/next button disabled state for the preview image strip.
+     */
+    function updatePreviewImagesStripNavState() {
+        const stripEl = document.getElementById('preview-images-strip');
+        const trackWrap = stripEl?.querySelector('.preview-images-track-wrap');
+        const prevBtn = stripEl?.querySelector('.preview-images-prev');
+        const nextBtn = stripEl?.querySelector('.preview-images-next');
+        if (!trackWrap || !prevBtn || !nextBtn) return;
+        const scrollLeft = trackWrap.scrollLeft;
+        const maxScroll = trackWrap.scrollWidth - trackWrap.clientWidth;
+        prevBtn.disabled = scrollLeft <= 0;
+        nextBtn.disabled = maxScroll <= 0 || scrollLeft >= maxScroll - 1;
+    }
+
+    /**
+     * Populate and show/hide the slidable image strip from chunk content (before answer generation).
+     * Does not change preview summary generation logic.
+     */
+    function setPreviewImagesStrip(content) {
+        const stripEl = document.getElementById('preview-images-strip');
+        const trackEl = document.getElementById('preview-images-track');
+        const trackWrap = stripEl?.querySelector('.preview-images-track-wrap');
+        if (!stripEl || !trackEl) return;
+
+        const urls = extractImageUrlsFromContent(content);
+        trackEl.innerHTML = '';
+        if (urls.length === 0) {
+            stripEl.classList.add('hidden');
+            return;
+        }
+
+        urls.forEach((src) => {
+            const img = document.createElement('img');
+            img.src = src;
+            img.alt = 'Chunk image';
+            img.loading = 'lazy';
+            img.onload = updatePreviewImagesStripNavState;
+            trackEl.appendChild(img);
+        });
+
+        stripEl.classList.remove('hidden');
+        updatePreviewImagesStripNavState();
+    }
+
+    function clearPreviewImagesStrip() {
+        const stripEl = document.getElementById('preview-images-strip');
+        const trackEl = document.getElementById('preview-images-track');
+        if (stripEl) stripEl.classList.add('hidden');
+        if (trackEl) trackEl.innerHTML = '';
+    }
+
     // Preview functions
     async function togglePreview(sectionId, docName, sectionTitle, content, docId, sectionHeading) {
         const previewPanel = getElement('section-preview-panel');
@@ -1509,6 +1578,9 @@ document.addEventListener('DOMContentLoaded', function () {
             const previewSectionTitleEl = getElement('preview-section-title');
             if (previewDocNameEl) previewDocNameEl.textContent = docName;
             if (previewSectionTitleEl) previewSectionTitleEl.textContent = sectionTitle;
+
+            // Image strip from chunk content — show before answer generation (do not change summary logic)
+            setPreviewImagesStrip(content);
 
             // Show loading state (matching v0 style)
             previewContent.innerHTML = `
@@ -1577,6 +1649,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         activePreviewId = null;
         previewLoadingInProgress = false; // Reset preview loading flag when closing
+        clearPreviewImagesStrip();
 
         if (previewPanel) {
             previewPanel.classList.add('hidden');
@@ -1688,6 +1761,18 @@ document.addEventListener('DOMContentLoaded', function () {
     if (closePreviewBtn) {
         closePreviewBtn.addEventListener('click', closePreviewPanel);
     }
+
+    // One-time setup: preview image strip prev/next and scroll
+    (function initPreviewImagesStripNav() {
+        const stripEl = document.getElementById('preview-images-strip');
+        const trackWrap = stripEl?.querySelector('.preview-images-track-wrap');
+        const prevBtn = stripEl?.querySelector('.preview-images-prev');
+        const nextBtn = stripEl?.querySelector('.preview-images-next');
+        if (!stripEl || !trackWrap || !prevBtn || !nextBtn) return;
+        prevBtn.addEventListener('click', () => trackWrap.scrollBy({ left: -200, behavior: 'smooth' }));
+        nextBtn.addEventListener('click', () => trackWrap.scrollBy({ left: 200, behavior: 'smooth' }));
+        trackWrap.addEventListener('scroll', updatePreviewImagesStripNavState);
+    })();
 
     // Document Viewer Sidebar functions
     const documentViewerSidebar = document.getElementById('document-viewer-sidebar');

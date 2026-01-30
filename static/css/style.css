@@ -2651,6 +2651,72 @@ main {
     margin-bottom: 0;
 }
 
+/* Preview panel slidable image strip */
+.preview-images-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 12px 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--muted);
+    min-height: 0;
+}
+
+.preview-images-strip.hidden {
+    display: none;
+}
+
+.preview-images-track-wrap {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+}
+
+.preview-images-track {
+    display: flex;
+    gap: 12px;
+    padding: 4px 0;
+}
+
+.preview-images-track img {
+    flex-shrink: 0;
+    max-height: 140px;
+    width: auto;
+    object-fit: contain;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    cursor: pointer;
+}
+
+.preview-images-nav {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: white;
+    color: var(--foreground);
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s;
+}
+
+.preview-images-nav:hover:not(:disabled) {
+    background: var(--muted);
+    color: var(--primary);
+}
+
+.preview-images-nav:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 /* When preview is open, adjust explanation bubble */
 .explainer-right.preview-open .explanation-bubble {
     flex: 1;
