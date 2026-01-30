@@ -136,8 +136,12 @@
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <button id="preview-full-doc-btn" class="preview-btn">
-                            <img src="{{ url_for('static', filename='icons/eye.svg') }}" width="12" height="12">
+                        <button type="button" id="view-images-btn" class="view-images-btn hidden" title="View images from this chunk">
+                            <img src="{{ url_for('static', filename='icons/image-16.png') }}" width="16" height="16" alt="" style="filter: brightness(0) invert(1);">
+                            <span>View Images</span>
+                        </button>
+                        <button type="button" id="preview-full-doc-btn" class="view-images-btn" title="View full document">
+                            <img src="{{ url_for('static', filename='icons/eye.svg') }}" width="14" height="14" style="filter: brightness(0) invert(1);">
                             <span>View Doc</span>
                         </button>
                         <button id="close-preview-btn" class="action-btn" title="Close preview">
@@ -145,18 +149,6 @@
                                 style="opacity: 0.5;">
                         </button>
                     </div>
-                </div>
-                <!-- Slidable image strip (from chunk content, shown before summary) -->
-                <div id="preview-images-strip" class="preview-images-strip hidden">
-                    <button type="button" class="preview-images-nav preview-images-prev" aria-label="Previous image">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
-                    </button>
-                    <div class="preview-images-track-wrap">
-                        <div class="preview-images-track" id="preview-images-track"></div>
-                    </div>
-                    <button type="button" class="preview-images-nav preview-images-next" aria-label="Next image">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
-                    </button>
                 </div>
                 <div id="preview-content" class="preview-panel-content scroll-area">
                     <!-- Section content will be inserted here -->
@@ -303,6 +295,44 @@
             style="text-align: center; color: var(--muted-foreground); font-size: 0.875rem; margin: auto;">
             Document preview will appear here.
         </p>
+    </div>
+</div>
+
+<!-- Right Image Sidebar (View Images) -->
+<div id="preview-images-sidebar" class="preview-images-sidebar">
+    <div class="preview-images-sidebar-inner">
+        <div class="preview-images-sidebar-header">
+            <h3 class="preview-images-sidebar-title">Images</h3>
+            <button type="button" id="close-images-sidebar-btn" class="action-btn" aria-label="Close images">
+                <img src="{{ url_for('static', filename='icons/close.svg') }}" width="18" height="18" style="opacity: 0.6;">
+            </button>
+        </div>
+        <div id="preview-images-sidebar-list" class="preview-images-sidebar-list scroll-area">
+            <!-- Thumbnails injected by JS -->
+        </div>
+    </div>
+</div>
+
+<!-- Expanded image modal (full-screen) -->
+<div id="preview-image-expanded-modal" class="preview-image-expanded-modal hidden">
+    <button type="button" id="close-expanded-image-btn" class="action-btn preview-image-expanded-close" aria-label="Close">
+        <img src="{{ url_for('static', filename='icons/close.svg') }}" width="24" height="24" style="opacity: 0.9;">
+    </button>
+    <div class="preview-image-expanded-wrap">
+        <img id="preview-image-expanded-img" src="" alt="Expanded" class="preview-image-expanded-img">
+    </div>
+    <div class="preview-image-expanded-nav">
+        <div id="preview-expanded-count" class="preview-expanded-count">Image 0 of 0</div>
+        <div class="preview-expanded-buttons">
+            <button type="button" id="preview-expanded-prev-btn" class="preview-expanded-nav-btn" disabled>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+                <span>Prev</span>
+            </button>
+            <button type="button" id="preview-expanded-next-btn" class="preview-expanded-nav-btn" disabled>
+                <span>Next</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+        </div>
     </div>
 </div>
 

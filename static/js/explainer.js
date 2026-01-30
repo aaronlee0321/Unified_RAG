@@ -39,6 +39,12 @@ document.addEventListener('DOMContentLoaded', function () {
     let activePreviewDocIds = {}; // Map sectionId -> docId for all active previews (supports multiple docs)
     let groupedResults = {}; // { docName: [{ choice, storeItem, index }] }
 
+    // View Images sidebar (right sidebar, toggled by "View Images" button)
+    let previewImageUrls = []; // Image URLs from current chunk content
+    let imageSidebarOpen = false;
+    let currentImageIndex = 0;
+    let isJumping = false;
+
     // Alias management state
     const aliasState = {
         keywords: [],
@@ -136,6 +142,21 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!isInsideDrawer && !isButton && !isModal) {
                 aliasesDrawer.classList.remove('open');
                 saveExplainerState(); // Save state when drawer closes
+            }
+        }
+
+        // Close View Images sidebar when clicking outside (sidebar, View Images button, or expanded modal)
+        const imagesSidebar = document.getElementById('preview-images-sidebar');
+        const viewImagesBtn = document.getElementById('view-images-btn');
+        const expandedModal = document.getElementById('preview-image-expanded-modal');
+        if (imagesSidebar && imagesSidebar.classList.contains('open')) {
+            const isInsideSidebar = imagesSidebar.contains(e.target);
+            const isViewImagesButton = viewImagesBtn && viewImagesBtn.contains(e.target);
+            const clickedExpandedModalOrInside = expandedModal && expandedModal.contains(e.target);
+            const expandedModalVisible = expandedModal && !expandedModal.classList.contains('hidden');
+            // Don't close if click was in sidebar, on button, in modal, or when expanded image is open (thumbnail click replaces DOM so target can be detached)
+            if (!isInsideSidebar && !isViewImagesButton && !clickedExpandedModalOrInside && !expandedModalVisible) {
+                closeImageSidebar();
             }
         }
 
@@ -1502,56 +1523,69 @@ document.addEventListener('DOMContentLoaded', function () {
         return urls;
     }
 
-    /**
-     * Update prev/next button disabled state for the preview image strip.
-     */
-    function updatePreviewImagesStripNavState() {
-        const stripEl = document.getElementById('preview-images-strip');
-        const trackWrap = stripEl?.querySelector('.preview-images-track-wrap');
-        const prevBtn = stripEl?.querySelector('.preview-images-prev');
-        const nextBtn = stripEl?.querySelector('.preview-images-next');
-        if (!trackWrap || !prevBtn || !nextBtn) return;
-        const scrollLeft = trackWrap.scrollLeft;
-        const maxScroll = trackWrap.scrollWidth - trackWrap.clientWidth;
-        prevBtn.disabled = scrollLeft <= 0;
-        nextBtn.disabled = maxScroll <= 0 || scrollLeft >= maxScroll - 1;
+    function closeImageSidebar() {
+        imageSidebarOpen = false;
+        const sidebar = document.getElementById('preview-images-sidebar');
+        if (sidebar) sidebar.classList.remove('open');
     }
 
-    /**
-     * Populate and show/hide the slidable image strip from chunk content (before answer generation).
-     * Does not change preview summary generation logic.
-     */
-    function setPreviewImagesStrip(content) {
-        const stripEl = document.getElementById('preview-images-strip');
-        const trackEl = document.getElementById('preview-images-track');
-        const trackWrap = stripEl?.querySelector('.preview-images-track-wrap');
-        if (!stripEl || !trackEl) return;
+    function openImageSidebar() {
+        if (previewImageUrls.length === 0) return;
+        imageSidebarOpen = true;
+        const sidebar = document.getElementById('preview-images-sidebar');
+        if (sidebar) sidebar.classList.add('open');
+        renderPreviewImagesSidebar();
+    }
 
-        const urls = extractImageUrlsFromContent(content);
-        trackEl.innerHTML = '';
-        if (urls.length === 0) {
-            stripEl.classList.add('hidden');
-            return;
-        }
+    function renderPreviewImagesSidebar() {
+        const listEl = document.getElementById('preview-images-sidebar-list');
+        if (!listEl) return;
 
-        urls.forEach((src) => {
+        listEl.innerHTML = '';
+        const n = previewImageUrls.length;
+        if (n === 0) return;
+
+        previewImageUrls.forEach((src, index) => {
+            const wrap = document.createElement('div');
+            wrap.className = 'preview-images-sidebar-thumb' + (index === currentImageIndex ? ' selected' : '');
+            wrap.dataset.index = String(index);
+            const inner = document.createElement('div');
+            inner.className = 'preview-images-sidebar-thumb-inner';
             const img = document.createElement('img');
             img.src = src;
-            img.alt = 'Chunk image';
+            img.alt = 'Chunk image ' + (index + 1);
             img.loading = 'lazy';
-            img.onload = updatePreviewImagesStripNavState;
-            trackEl.appendChild(img);
+            inner.appendChild(img);
+            wrap.appendChild(inner);
+            const cap = document.createElement('div');
+            cap.className = 'preview-images-sidebar-thumb-caption';
+            cap.textContent = 'Image ' + (index + 1);
+            wrap.appendChild(cap);
+            wrap.addEventListener('click', () => {
+                currentImageIndex = index;
+                renderPreviewImagesSidebar();
+                const modal = document.getElementById('preview-image-expanded-modal');
+                const imgEl = document.getElementById('preview-image-expanded-img');
+                if (modal && imgEl) {
+                    imgEl.src = previewImageUrls[index];
+                    modal.classList.remove('hidden');
+                    updateExpandedNav();
+                }
+            });
+            listEl.appendChild(wrap);
         });
-
-        stripEl.classList.remove('hidden');
-        updatePreviewImagesStripNavState();
     }
 
-    function clearPreviewImagesStrip() {
-        const stripEl = document.getElementById('preview-images-strip');
-        const trackEl = document.getElementById('preview-images-track');
-        if (stripEl) stripEl.classList.add('hidden');
-        if (trackEl) trackEl.innerHTML = '';
+    function updateExpandedNav() {
+        const countEl = document.getElementById('preview-expanded-count');
+        const prevBtn = document.getElementById('preview-expanded-prev-btn');
+        const nextBtn = document.getElementById('preview-expanded-next-btn');
+        const imgEl = document.getElementById('preview-image-expanded-img');
+        const n = previewImageUrls.length;
+        if (countEl) countEl.textContent = n ? `Image ${currentImageIndex + 1} of ${n}` : 'Image 0 of 0';
+        if (prevBtn) prevBtn.disabled = n === 0 || currentImageIndex <= 0;
+        if (nextBtn) nextBtn.disabled = n === 0 || currentImageIndex >= n - 1;
+        if (imgEl && n && previewImageUrls[currentImageIndex]) imgEl.src = previewImageUrls[currentImageIndex];
     }
 
     // Preview functions
@@ -1579,8 +1613,18 @@ document.addEventListener('DOMContentLoaded', function () {
             if (previewDocNameEl) previewDocNameEl.textContent = docName;
             if (previewSectionTitleEl) previewSectionTitleEl.textContent = sectionTitle;
 
-            // Image strip from chunk content — show before answer generation (do not change summary logic)
-            setPreviewImagesStrip(content);
+            // Store image URLs for "View Images" sidebar; show button only when chunk has images
+            previewImageUrls = extractImageUrlsFromContent(content);
+            const viewImagesBtn = document.getElementById('view-images-btn');
+            if (viewImagesBtn) {
+                if (previewImageUrls.length > 0) {
+                    viewImagesBtn.classList.remove('hidden');
+                    currentImageIndex = 0;
+                } else {
+                    viewImagesBtn.classList.add('hidden');
+                }
+            }
+            closeImageSidebar();
 
             // Show loading state (matching v0 style)
             previewContent.innerHTML = `
@@ -1649,7 +1693,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
         activePreviewId = null;
         previewLoadingInProgress = false; // Reset preview loading flag when closing
-        clearPreviewImagesStrip();
+        previewImageUrls = [];
+        closeImageSidebar();
+        const viewImagesBtn = document.getElementById('view-images-btn');
+        if (viewImagesBtn) viewImagesBtn.classList.add('hidden');
 
         if (previewPanel) {
             previewPanel.classList.add('hidden');
@@ -1762,17 +1809,67 @@ document.addEventListener('DOMContentLoaded', function () {
         closePreviewBtn.addEventListener('click', closePreviewPanel);
     }
 
-    // One-time setup: preview image strip prev/next and scroll
-    (function initPreviewImagesStripNav() {
-        const stripEl = document.getElementById('preview-images-strip');
-        const trackWrap = stripEl?.querySelector('.preview-images-track-wrap');
-        const prevBtn = stripEl?.querySelector('.preview-images-prev');
-        const nextBtn = stripEl?.querySelector('.preview-images-next');
-        if (!stripEl || !trackWrap || !prevBtn || !nextBtn) return;
-        prevBtn.addEventListener('click', () => trackWrap.scrollBy({ left: -200, behavior: 'smooth' }));
-        nextBtn.addEventListener('click', () => trackWrap.scrollBy({ left: 200, behavior: 'smooth' }));
-        trackWrap.addEventListener('scroll', updatePreviewImagesStripNavState);
-    })();
+    // View Images button: toggle right sidebar + jump animation
+    const viewImagesBtnEl = document.getElementById('view-images-btn');
+    if (viewImagesBtnEl) {
+        viewImagesBtnEl.addEventListener('click', () => {
+            imageSidebarOpen = !imageSidebarOpen;
+            const sidebar = document.getElementById('preview-images-sidebar');
+            if (imageSidebarOpen) {
+                openImageSidebar();
+            } else if (sidebar) {
+                sidebar.classList.remove('open');
+            }
+            isJumping = true;
+            viewImagesBtnEl.classList.add('jump-animate');
+            setTimeout(() => {
+                isJumping = false;
+                viewImagesBtnEl.classList.remove('jump-animate');
+            }, 400);
+        });
+    }
+
+    // Close images sidebar
+    const closeImagesSidebarBtn = document.getElementById('close-images-sidebar-btn');
+    if (closeImagesSidebarBtn) {
+        closeImagesSidebarBtn.addEventListener('click', () => {
+            closeImageSidebar();
+        });
+    }
+
+    // Prev/Next in expanded image modal (bottom of screen)
+    const previewExpandedPrevBtn = document.getElementById('preview-expanded-prev-btn');
+    const previewExpandedNextBtn = document.getElementById('preview-expanded-next-btn');
+    if (previewExpandedPrevBtn) {
+        previewExpandedPrevBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (currentImageIndex > 0) {
+                currentImageIndex--;
+                updateExpandedNav();
+                renderPreviewImagesSidebar();
+            }
+        });
+    }
+    if (previewExpandedNextBtn) {
+        previewExpandedNextBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (currentImageIndex < previewImageUrls.length - 1) {
+                currentImageIndex++;
+                updateExpandedNav();
+                renderPreviewImagesSidebar();
+            }
+        });
+    }
+
+    // Expanded image modal: close button
+    const closeExpandedImageBtn = document.getElementById('close-expanded-image-btn');
+    const expandedImageModal = document.getElementById('preview-image-expanded-modal');
+    if (closeExpandedImageBtn && expandedImageModal) {
+        closeExpandedImageBtn.addEventListener('click', () => expandedImageModal.classList.add('hidden'));
+        expandedImageModal.addEventListener('click', (e) => {
+            if (e.target === expandedImageModal) expandedImageModal.classList.add('hidden');
+        });
+    }
 
     // Document Viewer Sidebar functions
     const documentViewerSidebar = document.getElementById('document-viewer-sidebar');
