@@ -555,8 +555,9 @@ def gdd_query():
         data = request.get_json()
         query = data.get('query', '')
         selected_doc = data.get('selected_doc', None)
+        language = data.get('language', None)
 
-        result = query_gdd_documents(query, selected_doc)
+        result = query_gdd_documents(query, selected_doc, language=language)
         return jsonify(result)
     except Exception as e:
         app.logger.error(f"Error in GDD query: {e}")

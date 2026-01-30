@@ -359,7 +359,8 @@ def upload_and_index_document_bytes(pdf_bytes: bytes, original_filename: str, pr
 
     temp_dir = tempfile.mkdtemp(prefix="gdd_upload_")
     try:
-        pdf_path = Path(temp_dir) / secure_filename(original_filename).replace(" ", "_")
+        pdf_path = Path(temp_dir) / \
+            secure_filename(original_filename).replace(" ", "_")
         pdf_path.write_bytes(pdf_bytes)
         # Use the same pipeline as the CLI script (index_pdf_with_marker --file ... --debug)
         result = index_pdf_with_marker(
@@ -604,13 +605,15 @@ def get_document_sections(doc_id: str) -> List[Dict[str, str]]:
         return []
 
 
-def query_gdd_documents(query: str, selected_doc: str = None):
+def query_gdd_documents(query: str, selected_doc: str = None, language: str = None):
     """
     Query GDD documents using RAG.
 
     Args:
         query: User query string
         selected_doc: Optional document selection (format: "filename (doc_id)" or "All Documents")
+        language: Optional response language override: 'en' (English) or 'vn'/'vi' (Vietnamese).
+                  When set, overrides auto-detection for answer language.
 
     Returns:
         dict: Response with answer and metadata
@@ -977,15 +980,22 @@ def query_gdd_documents(query: str, selected_doc: str = None):
             if markdown_chunks:
                 selected_chunks = _select_chunks_for_answer(markdown_chunks)
 
-                # Detect language from retrieval metrics or fallback to detection function
+                # Use explicit language override from UI (en/vn) if provided; empty string = no override
                 detected_language = None
-                if retrieval_metrics and 'language_detection' in retrieval_metrics:
+                if language is not None and str(language).strip():
+                    lang_lower = str(language).strip().lower()
+                    if lang_lower in ("vn", "vi", "vietnamese"):
+                        detected_language = "vi"
+                    elif lang_lower in ("en", "english"):
+                        detected_language = "en"
+
+                # Else detect from retrieval metrics or fallback to detection function
+                if detected_language is None and retrieval_metrics and 'language_detection' in retrieval_metrics:
                     lang_info = retrieval_metrics.get('language_detection', {})
                     detected_language = lang_info.get(
                         'detected_language', None)
 
-                # Fallback to language detection function if not in metrics
-                if not detected_language:
+                if detected_language is None:
                     detected_language = _detect_question_language(query)
                     # Convert to 'en' or 'vi' format to match retrieval metrics
                     if detected_language == 'english':
@@ -1025,14 +1035,19 @@ Chunks:
 Provide a clear, comprehensive answer based on the chunks above. If chunks reference specific sections (e.g., "4.1 DanhsáchTanks"), mention those section numbers in your answer."""
                 answer = provider.llm(prompt)
             else:
-                # Detect language for error message
+                # Use explicit language override from UI if provided; empty string = no override
                 detected_language = None
-                if retrieval_metrics and 'language_detection' in retrieval_metrics:
+                if language is not None and str(language).strip():
+                    lang_lower = str(language).strip().lower()
+                    if lang_lower in ("vn", "vi", "vietnamese"):
+                        detected_language = "vi"
+                    elif lang_lower in ("en", "english"):
+                        detected_language = "en"
+                if detected_language is None and retrieval_metrics and 'language_detection' in retrieval_metrics:
                     lang_info = retrieval_metrics.get('language_detection', {})
                     detected_language = lang_info.get(
                         'detected_language', None)
-
-                if not detected_language:
+                if detected_language is None:
                     detected_language = _detect_question_language(query)
                     if detected_language == 'english':
                         detected_language = 'en'

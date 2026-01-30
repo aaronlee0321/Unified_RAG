@@ -18,7 +18,10 @@ document.addEventListener('DOMContentLoaded', function() {
     let selectedDocId = null; // Track selected document ID
     let allDocumentsData = null; // Store all documents data for filtering
     const CHAT_STORAGE_KEY = 'gdd_chat_history';
+    const GDD_LANGUAGE_KEY = 'gdd_language';
     let isUpdatingFromSelection = false; // Flag to prevent circular updates
+    // Response language: 'en' (toggle checked) or 'vn' (toggle unchecked)
+    let gddLanguage = (typeof localStorage !== 'undefined' && localStorage.getItem(GDD_LANGUAGE_KEY)) || 'en';
     let sectionDropdown = null; // Section dropdown element
     let documentSections = []; // Cached sections for selected document
     
@@ -33,6 +36,16 @@ document.addEventListener('DOMContentLoaded', function() {
         console.warn('Navigation type detection failed:', e);
     }
     
+    // GDD language toggle (EN/VN) – top right (same convention as Keyword Finder: checked = VN, unchecked = EN)
+    const gddLanguageToggle = document.getElementById('gdd-language-toggle');
+    if (gddLanguageToggle) {
+        gddLanguageToggle.checked = gddLanguage === 'vn';
+        gddLanguageToggle.addEventListener('change', function() {
+            gddLanguage = this.checked ? 'vn' : 'en';
+            try { localStorage.setItem(GDD_LANGUAGE_KEY, gddLanguage); } catch (e) {}
+        });
+    }
+
     // Load documents on page load
     loadDocuments();
     // Restore chat history
@@ -198,7 +211,8 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             body: JSON.stringify({
                 query: queryText || query, // Use queryText if available, fallback to full query
-                selected_doc: selectedDocument
+                selected_doc: selectedDocument,
+                language: gddLanguage
             })
         })
         .then(parseJsonSafe)
