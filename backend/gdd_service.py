@@ -5,10 +5,9 @@ Extracted from gradio_app.py - handles GDD document queries
 
 import os
 import sys
-import asyncio
 import shutil
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 from werkzeug.utils import secure_filename
 
@@ -64,21 +63,6 @@ def _generate_doc_id_from_filename(filename: Path) -> str:
     while "__" in doc_id:
         doc_id = doc_id.replace("__", "_")
     return doc_id.strip("_")
-
-
-def _find_markdown_file_from_doc_id(doc_id: str) -> Optional[Path]:
-    """
-    DEPRECATED: No longer uses local files. Always returns None.
-    Markdown content is now stored in Supabase.
-
-    Args:
-        doc_id: Document ID
-
-    Returns:
-        None (local files are no longer used)
-    """
-    # Local files are no longer used - all content is in Supabase
-    return None
 
 
 def list_documents_from_markdown() -> List[Dict[str, Any]]:
@@ -899,8 +883,6 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
 
         # Create provider and query
         try:
-            # COMMENTED OUT: Qwen usage - using OpenAI instead
-            # provider = QwenProvider()
             from backend.services.llm_provider import SimpleLLMProvider
             provider = SimpleLLMProvider()
         except Exception as e:

@@ -3,6 +3,7 @@ Code Q&A Service
 Extracted from code_qa/app.py - handles codebase queries with Supabase integration
 """
 
+from gdd_rag_backbone.llm_providers import make_embedding_func
 import os
 import sys
 import time
@@ -25,7 +26,7 @@ def _resolve_local_code_path(supabase_path: str) -> Optional[Path]:
     """
     DEPRECATED: This function is no longer used.
     All file operations now use Supabase only (works on Render).
-    
+
     Returns None to indicate local file access is not supported.
     """
     # Local file access is disabled - all operations use Supabase
@@ -65,8 +66,10 @@ def _analyze_csharp_file_symbols(code_text: str) -> Tuple[List[Dict[str, Any]], 
         r'(?:void|[\w<>\[\],]+)\s+'                          # return type
         r'(?P<name>\w+)\s*'                                  # method name
         r'\([^)]*\)\s*'                                      # parameters
-        r'(?:where\s+\w+\s*:\s*[^{=>]+)?\s*'                 # generic constraints
-        r'(?:\{|=>)',                                        # block or expression-bodied
+        # generic constraints
+        r'(?:where\s+\w+\s*:\s*[^{=>]+)?\s*'
+        # block or expression-bodied
+        r'(?:\{|=>)',
         re.MULTILINE
     )
 
@@ -75,11 +78,15 @@ def _analyze_csharp_file_symbols(code_text: str) -> Tuple[List[Dict[str, Any]], 
     # Must have at least one modifier (access or static/const/readonly) to avoid false positives
     field_pattern = re.compile(
         r'^[ \t]*(?:\[[^\]]*\]\s*)*'                          # attributes
-        r'(?:(?:public|private|protected|internal)\s+)?'        # optional access modifier
-        r'(?:(?:static|const|readonly)\s+)?'                  # optional modifiers
-        r'[\w<>\[\],\s]+\s+'                                   # type (must be present)
+        # optional access modifier
+        r'(?:(?:public|private|protected|internal)\s+)?'
+        # optional modifiers
+        r'(?:(?:static|const|readonly)\s+)?'
+        # type (must be present)
+        r'[\w<>\[\],\s]+\s+'
         r'(?P<name>\w+)\s*'                                    # field name
-        r'(?:=[^;]*)?;',                                       # optional initializer
+        # optional initializer
+        r'(?:=[^;]*)?;',
         re.MULTILINE
     )
 
@@ -87,11 +94,13 @@ def _analyze_csharp_file_symbols(code_text: str) -> Tuple[List[Dict[str, Any]], 
     # Handles both traditional properties and expression-bodied properties
     property_pattern = re.compile(
         r'^[ \t]*(?:\[[^\]]*\]\s*)*'                          # attributes
-        r'(?:public|private|protected|internal)?\s*'            # optional access modifier
+        # optional access modifier
+        r'(?:public|private|protected|internal)?\s*'
         r'(?:static|virtual|override|sealed|abstract)?\s*'   # optional modifiers
         r'[\w<>\[\],\s]+\s+'                                   # return type
         r'(?P<name>\w+)\s*'                                    # property name
-        r'(?:\{[^\}]*\}|=>[^;]+)',                            # { get; set; } or => expression
+        # { get; set; } or => expression
+        r'(?:\{[^\}]*\}|=>[^;]+)',
         re.MULTILINE
     )
 
@@ -134,26 +143,26 @@ def _analyze_csharp_file_symbols(code_text: str) -> Tuple[List[Dict[str, Any]], 
 def _extract_variables_from_methods(code_text: str, methods: List[Dict[str, Any]], selected_method_names: List[str]) -> List[Dict[str, Any]]:
     """
     Extract variables (local variables, parameters) from specific method bodies.
-    
+
     Args:
         code_text: Full source code text
         methods: List of method dicts with 'name', 'line', 'signature'
         selected_method_names: List of method names to extract variables from
-    
+
     Returns:
         List of variable dicts with 'name', 'line', 'method', 'declaration'
     """
     variables = []
-    
+
     # Precompute line offsets
     line_starts = [0]
     for m in re.finditer(r"\n", code_text):
         line_starts.append(m.end())
-    
+
     def _line_number_for_pos(pos: int) -> int:
         import bisect
         return bisect.bisect_right(line_starts, pos)
-    
+
     # Find method bodies for selected methods
     method_pattern = re.compile(
         r'^[ \t]*(?:\[[^\]]+\]\s*)*'
@@ -166,7 +175,7 @@ def _extract_variables_from_methods(code_text: str, methods: List[Dict[str, Any]
         r'(?:\{|=>)',
         re.MULTILINE
     )
-    
+
     # Pattern for local variable declarations within method bodies
     # Matches: type name; or type name = value;
     local_var_pattern = re.compile(
@@ -176,7 +185,7 @@ def _extract_variables_from_methods(code_text: str, methods: List[Dict[str, Any]
         r'(?:=[^;]*)?;',
         re.MULTILINE
     )
-    
+
     # Find all methods and their positions
     method_matches = []
     for match in method_pattern.finditer(code_text):
@@ -184,12 +193,12 @@ def _extract_variables_from_methods(code_text: str, methods: List[Dict[str, Any]
         if method_name in selected_method_names:
             method_start = match.start()
             method_end = match.end()
-            
+
             # Find the method body (from opening brace to matching closing brace)
             brace_count = 0
             body_start = None
             body_end = None
-            
+
             # Find opening brace
             for i in range(method_end, len(code_text)):
                 if code_text[i] == '{':
@@ -200,7 +209,7 @@ def _extract_variables_from_methods(code_text: str, methods: List[Dict[str, Any]
                 elif code_text[i] == '}':
                     # Method might be expression-bodied (=>)
                     break
-            
+
             if body_start is not None:
                 # Find matching closing brace
                 for i in range(body_start, len(code_text)):
@@ -211,25 +220,26 @@ def _extract_variables_from_methods(code_text: str, methods: List[Dict[str, Any]
                         if brace_count == 0:
                             body_end = i
                             break
-                
+
                 if body_end is not None:
                     method_body = code_text[body_start:body_end]
-                    
+
                     # Extract local variables from method body
                     for var_match in local_var_pattern.finditer(method_body):
                         var_name = var_match.group("name")
                         var_start = body_start + var_match.start()
                         var_line = _line_number_for_pos(var_start)
                         var_decl = var_match.group(0).strip()
-                        
+
                         variables.append({
                             "name": var_name,
                             "line": var_line,
                             "method": method_name,
                             "declaration": var_decl,
                         })
-    
+
     return variables
+
 
 # Import prompts (now included in unified_rag_app)
 try:
@@ -249,12 +259,12 @@ except ImportError:
         # Fallback prompts if file not found
         HYDE_SYSTEM_PROMPT = '''You are a code-search query rewriter for a code RAG system.
 Your ONLY job is to transform a natural language query into a better search query over the existing codebase.'''
-        
+
         HYDE_V2_SYSTEM_PROMPT = '''You are a code-search query refiner for a code RAG system.
 Your task is to enhance the original query: {query}
 using ONLY the information present in the provided context: {temp_context}
 Rewrite the query to include precise method names, class names, file paths that appear in the context.'''
-        
+
         CHAT_SYSTEM_PROMPT = '''You are a STRICTLY codebase-aware assistant.
 You MUST answer ONLY using the following code context: {context}
 Use ONLY information explicitly present in the context above.'''
@@ -271,21 +281,24 @@ try:
     SUPABASE_AVAILABLE = USE_SUPABASE
     # Use the normalize function from storage module
     normalize_path_consistent = normalize_path_storage
-    
+
     if not SUPABASE_AVAILABLE:
         import logging
         logger = logging.getLogger(__name__)
         logger.warning("Supabase is configured but USE_SUPABASE is False")
-        logger.warning("Check SUPABASE_URL and SUPABASE_KEY environment variables")
-        
+        logger.warning(
+            "Check SUPABASE_URL and SUPABASE_KEY environment variables")
+
 except ImportError as e:
     SUPABASE_AVAILABLE = False
     import logging
     logger = logging.getLogger(__name__)
     logger.warning(f"Supabase storage not available for Code Q&A: {e}")
-    logger.warning("This is expected if the 'supabase' package is not installed locally.")
-    logger.warning("On Render, the package should be installed and this will work.")
-    
+    logger.warning(
+        "This is expected if the 'supabase' package is not installed locally.")
+    logger.warning(
+        "On Render, the package should be installed and this will work.")
+
     # Fallback normalize function
     def normalize_path_consistent(p: str) -> Optional[str]:
         if p is None:
@@ -301,32 +314,17 @@ except ImportError as e:
             return None
 
 # Import LLM providers
-# Import from local gdd_rag_backbone (now included in unified_rag_app)
-# COMMENTED OUT: Qwen usage - using OpenAI instead
-# from gdd_rag_backbone.llm_providers import QwenProvider, make_embedding_func
-from gdd_rag_backbone.llm_providers import make_embedding_func
 
 # Initialize OpenAI client for HYDE and answer generation
-# COMMENTED OUT: Qwen priority - using OpenAI first
-# api_key = os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("OPENAI_API_KEY")
-api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")
+api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get(
+    "QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")
 if not api_key:
     raise ValueError("OPENAI_API_KEY environment variable must be set")
 
-# Use OpenAI endpoint (commented out DashScope/Qwen endpoint)
 base_url = None
-# COMMENTED OUT: Qwen/DashScope endpoint
-# if os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY"):
-#     base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-# else:
-#     base_url = None
-
 client = OpenAI(api_key=api_key, base_url=base_url)
 
-# Get LLM models from environment or use defaults - using OpenAI models
-# COMMENTED OUT: Qwen models
-# _hyde_model = os.environ.get("HYDE_MODEL", "qwen-plus")
-# _answer_model = os.environ.get("ANSWER_MODEL", "qwen-flash")
+# Get LLM models from environment or use defaults
 _hyde_model = os.environ.get("HYDE_MODEL", "gpt-4o-mini")
 _answer_model = os.environ.get("ANSWER_MODEL", "gpt-4o-mini")
 
@@ -339,29 +337,29 @@ def parse_cs_file_filter(raw_query: str):
     # Pattern to match @filename.cs or @path/file.cs
     pattern = r'@([^\s@]+\.cs)'
     matches = re.findall(pattern, raw_query)
-    
+
     if not matches:
         return raw_query, None
-    
+
     # Remove @filename.cs from query
     cleaned = raw_query
     for match in matches:
         cleaned = cleaned.replace(f'@{match}', '').strip()
-    
+
     # Resolve file paths (simplified - would need indexed_cs_files.json)
     file_paths = []
     for match in matches:
         # For now, just normalize the match
         # In full implementation, would look up in indexed_cs_files.json
         file_paths.append(match)
-    
+
     return cleaned, file_paths if file_paths else None
 
 
 def openai_hyde_v2(query: str, temp_context: str, hyde_query: str):
     """Generate HYDE v2 refined query using context"""
     start_time = time.time()
-    
+
     stream = client.chat.completions.create(
         model=_hyde_model,
         messages=[
@@ -376,21 +374,23 @@ def openai_hyde_v2(query: str, temp_context: str, hyde_query: str):
         ],
         stream=True
     )
-    
+
     first_token_time = None
     token_count = 0
     full_response = ""
-    
+
     for chunk in stream:
         if chunk.choices[0].delta.content:
             if first_token_time is None:
                 first_token_time = time.time() - start_time
             token_count += 1
             full_response += chunk.choices[0].delta.content
-    
+
     total_time = time.time() - start_time
-    token_rate = token_count / (total_time - first_token_time) if first_token_time and (total_time - first_token_time) > 0 else 0
-    
+    token_rate = token_count / \
+        (total_time - first_token_time) if first_token_time and (total_time -
+                                                                 first_token_time) > 0 else 0
+
     timing_data = {
         "total_time": round(total_time, 2),
         "ttft": round(first_token_time, 2) if first_token_time else None,
@@ -398,14 +398,14 @@ def openai_hyde_v2(query: str, temp_context: str, hyde_query: str):
         "token_rate": round(token_rate, 1) if token_rate > 0 else None,
         "response_length": len(full_response)
     }
-    
+
     return full_response, timing_data
 
 
 def openai_chat(query: str, context: str):
     """Generate answer using LLM with context"""
     start_time = time.time()
-    
+
     # Use simple placeholder replacement instead of str.format to avoid
     # KeyError when the prompt itself contains braces in example code.
     system_prompt = CHAT_SYSTEM_PROMPT.replace("{context}", context)
@@ -443,21 +443,23 @@ def openai_chat(query: str, context: str):
         max_tokens=2000,
         temperature=0
     )
-    
+
     first_token_time = None
     token_count = 0
     full_response = ""
-    
+
     for chunk in stream:
         if chunk.choices[0].delta.content:
             if first_token_time is None:
                 first_token_time = time.time() - start_time
             token_count += 1
             full_response += chunk.choices[0].delta.content
-    
+
     total_time = time.time() - start_time
-    token_rate = token_count / (total_time - first_token_time) if first_token_time and (total_time - first_token_time) > 0 else 0
-    
+    token_rate = token_count / \
+        (total_time - first_token_time) if first_token_time and (total_time -
+                                                                 first_token_time) > 0 else 0
+
     timing_data = {
         "total_time": round(total_time, 2),
         "ttft": round(first_token_time, 2) if first_token_time else None,
@@ -465,7 +467,7 @@ def openai_chat(query: str, context: str):
         "token_rate": round(token_rate, 1) if token_rate > 0 else None,
         "response_length": len(full_response)
     }
-    
+
     return full_response, timing_data
 
 
@@ -473,11 +475,12 @@ def _filter_chunks_by_files(chunks: List[Dict], allowed_paths: Optional[List[str
     """Filter chunks to only those whose file_path is in allowed_paths"""
     if not allowed_paths:
         return chunks
-    
-    allowed_set = {normalize_path_consistent(p) for p in allowed_paths if normalize_path_consistent(p) is not None}
+
+    allowed_set = {normalize_path_consistent(
+        p) for p in allowed_paths if normalize_path_consistent(p) is not None}
     if not allowed_set:
         return chunks
-    
+
     filtered = []
     for chunk in chunks:
         file_path = chunk.get("file_path")
@@ -486,41 +489,37 @@ def _filter_chunks_by_files(chunks: List[Dict], allowed_paths: Optional[List[str
         norm_path = normalize_path_consistent(file_path)
         if norm_path and norm_path in allowed_set:
             filtered.append(chunk)
-    
+
     return filtered
 
 
 def generate_context_supabase(
     query: str,
     file_filters: Optional[List[str]] = None,
-    provider = None,
+    provider=None,
     prioritize_class_chunks: bool = False
 ) -> tuple[str, Dict]:
     """
     Generate context from Supabase using vector search and HYDE v2.
-    
+
     Args:
         query: User query
         file_filters: Optional list of file paths to filter by
         provider: LLM provider for embeddings
-    
+
     Returns:
         (context_string, timing_info_dict)
     """
     if not SUPABASE_AVAILABLE:
         raise ValueError("Supabase is not configured for Code Q&A")
-    
+
     start_time = time.time()
     timing_info = {
         "query": query
     }
-    
+
     # Initialize provider if not provided
     if provider is None:
-        # COMMENTED OUT: Qwen usage - using OpenAI instead
-        # provider = QwenProvider()
-        # Note: For embeddings, we still use make_embedding_func which may require Qwen
-        # For LLM calls, we use OpenAI client directly
         from backend.services.llm_provider import SimpleLLMProvider
         try:
             provider = SimpleLLMProvider()
@@ -528,19 +527,19 @@ def generate_context_supabase(
             # Fallback to Qwen if OpenAI not available (for embeddings)
             from gdd_rag_backbone.llm_providers import QwenProvider
             provider = QwenProvider()
-    
+
     embedding_func = make_embedding_func(provider)
-    
+
     # Step 1: Initial search with original query
     search_start = time.time()
     query_embedding = embedding_func([query])[0]
-    
+
     # Get initial chunks
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"[Code Q&A] Starting search for query: {query[:100]}")
     logger.info(f"[Code Q&A] File filters: {file_filters}")
-    
+
     initial_methods = search_code_chunks_supabase(
         query=query,
         query_embedding=query_embedding,
@@ -550,7 +549,7 @@ def generate_context_supabase(
         chunk_type='method'
     )
     logger.info(f"[Code Q&A] Initial methods found: {len(initial_methods)}")
-    
+
     initial_classes = search_code_chunks_supabase(
         query=query,
         query_embedding=query_embedding,
@@ -560,37 +559,43 @@ def generate_context_supabase(
         chunk_type='class'
     )
     logger.info(f"[Code Q&A] Initial classes found: {len(initial_classes)}")
-    
+
     # Also do direct file lookup if filters are specified
     if file_filters:
-        direct_methods = get_code_chunks_for_files(file_filters, chunk_type='method')
-        direct_classes = get_code_chunks_for_files(file_filters, chunk_type='class')
-        
+        direct_methods = get_code_chunks_for_files(
+            file_filters, chunk_type='method')
+        direct_classes = get_code_chunks_for_files(
+            file_filters, chunk_type='class')
+
         # Combine and deduplicate
-        all_methods = {chunk.get('id'): chunk for chunk in initial_methods + direct_methods}
-        all_classes = {chunk.get('id'): chunk for chunk in initial_classes + direct_classes}
-        
+        all_methods = {
+            chunk.get('id'): chunk for chunk in initial_methods + direct_methods}
+        all_classes = {
+            chunk.get('id'): chunk for chunk in initial_classes + direct_classes}
+
         initial_methods = list(all_methods.values())
         initial_classes = list(all_classes.values())
-    
+
     # Limit to top 5 for HYDE context
     method_docs = initial_methods[:5]
     class_docs = initial_classes[:5]
-    
+
     # Step 2: Build temporary context for HYDE v2
-    methods_text = "\n".join([doc.get('code', '') or doc.get('source_code', '') for doc in method_docs])
-    classes_text = "\n".join([doc.get('source_code', '') for doc in class_docs])
+    methods_text = "\n".join([doc.get('code', '') or doc.get(
+        'source_code', '') for doc in method_docs])
+    classes_text = "\n".join([doc.get('source_code', '')
+                             for doc in class_docs])
     temp_context = methods_text + "\n" + classes_text
     temp_context = temp_context[:6000]  # Truncate for faster processing
-    
+
     # Step 3: HYDE v2 query generation
     hyde_query_v2, hyde_v2_timing = openai_hyde_v2(query, temp_context, query)
     timing_info["hyde_v2_generation"] = hyde_v2_timing
-    
+
     # Step 4: Final search with HYDE v2 refined query
     search_start = time.time()
     hyde_embedding = embedding_func([hyde_query_v2])[0]
-    
+
     final_methods = search_code_chunks_supabase(
         query=hyde_query_v2,
         query_embedding=hyde_embedding,
@@ -600,7 +605,7 @@ def generate_context_supabase(
         chunk_type='method'
     )
     logger.info(f"[Code Q&A] Final methods found: {len(final_methods)}")
-    
+
     final_classes = search_code_chunks_supabase(
         query=hyde_query_v2,
         query_embedding=hyde_embedding,
@@ -610,29 +615,36 @@ def generate_context_supabase(
         chunk_type='class'
     )
     logger.info(f"[Code Q&A] Final classes found: {len(final_classes)}")
-    
+
     # Filter by files if specified
     method_docs = _filter_chunks_by_files(final_methods, file_filters)
     class_docs = _filter_chunks_by_files(final_classes, file_filters)
-    logger.info(f"[Code Q&A] After filtering - methods: {len(method_docs)}, classes: {len(class_docs)}")
-    
+    logger.info(
+        f"[Code Q&A] After filtering - methods: {len(method_docs)}, classes: {len(class_docs)}")
+
     # If prioritizing class chunks (e.g., for global variables), get ALL class chunks directly
     if prioritize_class_chunks and file_filters:
-        logger.info("[Code Q&A] Prioritizing class chunks - retrieving all class chunks for file(s)")
-        direct_class_chunks = get_code_chunks_for_files(file_filters, chunk_type='class')
-        logger.info(f"[Code Q&A] Direct lookup found {len(direct_class_chunks)} class chunks")
-        
+        logger.info(
+            "[Code Q&A] Prioritizing class chunks - retrieving all class chunks for file(s)")
+        direct_class_chunks = get_code_chunks_for_files(
+            file_filters, chunk_type='class')
+        logger.info(
+            f"[Code Q&A] Direct lookup found {len(direct_class_chunks)} class chunks")
+
         # Log details about retrieved chunks
         for i, chunk in enumerate(direct_class_chunks):
             source_code_len = len(chunk.get('source_code', ''))
             class_name = chunk.get('class_name', 'unknown')
             file_path = chunk.get('file_path', 'unknown')
-            logger.info(f"[Code Q&A] Class chunk {i+1}: {class_name} from {file_path}, source_code length: {source_code_len}")
+            logger.info(
+                f"[Code Q&A] Class chunk {i+1}: {class_name} from {file_path}, source_code length: {source_code_len}")
             if source_code_len == 0:
-                logger.warning(f"[Code Q&A] WARNING: Class chunk {i+1} has empty source_code!")
+                logger.warning(
+                    f"[Code Q&A] WARNING: Class chunk {i+1} has empty source_code!")
             elif source_code_len < 100:
-                logger.warning(f"[Code Q&A] WARNING: Class chunk {i+1} has very short source_code ({source_code_len} chars) - might be truncated")
-        
+                logger.warning(
+                    f"[Code Q&A] WARNING: Class chunk {i+1} has very short source_code ({source_code_len} chars) - might be truncated")
+
         # Deduplicate by ID
         class_dict = {chunk.get('id'): chunk for chunk in class_docs}
         for chunk in direct_class_chunks:
@@ -640,23 +652,28 @@ def generate_context_supabase(
             if chunk_id and chunk_id not in class_dict:
                 class_dict[chunk_id] = chunk
         class_docs = list(class_dict.values())
-        logger.info(f"[Code Q&A] Retrieved {len(class_docs)} total class chunks (including direct lookup)")
-        
+        logger.info(
+            f"[Code Q&A] Retrieved {len(class_docs)} total class chunks (including direct lookup)")
+
         # Final check: ensure we have class chunks with source_code
-        valid_class_docs = [chunk for chunk in class_docs if chunk.get('source_code', '').strip()]
+        valid_class_docs = [chunk for chunk in class_docs if chunk.get(
+            'source_code', '').strip()]
         if len(valid_class_docs) < len(class_docs):
-            logger.warning(f"[Code Q&A] WARNING: {len(class_docs) - len(valid_class_docs)} class chunks have empty source_code!")
-        
+            logger.warning(
+                f"[Code Q&A] WARNING: {len(class_docs) - len(valid_class_docs)} class chunks have empty source_code!")
+
         # If no valid class chunks found, log error (no local disk fallback - must use Supabase)
         if len(valid_class_docs) == 0 and file_filters:
-            logger.error(f"[Code Q&A] ERROR: No class chunks found in Supabase for file(s): {file_filters}")
-            logger.error("[Code Q&A] These files may not be indexed. Please ensure all files are indexed in Supabase.")
-        
+            logger.error(
+                f"[Code Q&A] ERROR: No class chunks found in Supabase for file(s): {file_filters}")
+            logger.error(
+                "[Code Q&A] These files may not be indexed. Please ensure all files are indexed in Supabase.")
+
         class_docs = valid_class_docs
-    
+
     search_time = time.time() - search_start
     timing_info["vector_search_time"] = round(search_time, 2)
-    
+
     # Step 6: Combine results
     # If prioritizing class chunks, include ALL class chunks, otherwise limit to top 3
     if prioritize_class_chunks:
@@ -666,60 +683,69 @@ def generate_context_supabase(
     else:
         top_methods = method_docs[:3]
         all_classes = class_docs[:3]
-    
+
     methods_combined = "\n\n".join(
         f"File: {doc['file_path']}\nCode:\n{doc.get('code', doc.get('source_code', ''))}"
         for doc in top_methods
     )
-    
+
     classes_combined = "\n\n".join(
         f"File: {doc['file_path']}\nClass: {doc.get('class_name', 'Unknown')}\nClass Info:\n{doc.get('source_code', '')} References: \n{doc.get('code_references', '')}  \n END OF ROW {i}"
         for i, doc in enumerate(all_classes)
     )
-    
+
     # Log context summary for debugging
     if prioritize_class_chunks:
-        logger.info(f"[Code Q&A] Context for global variables: {len(all_classes)} class chunks, total context length: {len(classes_combined)}")
+        logger.info(
+            f"[Code Q&A] Context for global variables: {len(all_classes)} class chunks, total context length: {len(classes_combined)}")
         if len(classes_combined.strip()) == 0:
-            logger.error("[Code Q&A] ERROR: Class context is empty! Cannot extract global variables.")
+            logger.error(
+                "[Code Q&A] ERROR: Class context is empty! Cannot extract global variables.")
         else:
             # Log first 500 chars of context to verify it contains class definitions
-            logger.info(f"[Code Q&A] Context preview (first 500 chars): {classes_combined[:500]}")
-    
+            logger.info(
+                f"[Code Q&A] Context preview (first 500 chars): {classes_combined[:500]}")
+
     if prioritize_class_chunks:
         # Prioritize class chunks when extracting global variables
-        final_context = classes_combined + "\n\n" + (methods_combined if methods_combined else "")
+        final_context = classes_combined + "\n\n" + \
+            (methods_combined if methods_combined else "")
     else:
-        final_context = methods_combined + "\n below is class or constructor related code \n" + classes_combined
-    logger.info(f"[Code Q&A] Final context length: {len(final_context)} characters")
+        final_context = methods_combined + \
+            "\n below is class or constructor related code \n" + classes_combined
+    logger.info(
+        f"[Code Q&A] Final context length: {len(final_context)} characters")
     if len(final_context.strip()) == 0:
-        logger.warning("[Code Q&A] WARNING: Final context is empty! No code chunks retrieved.")
-    
+        logger.warning(
+            "[Code Q&A] WARNING: Final context is empty! No code chunks retrieved.")
+
     total_time = time.time() - start_time
     timing_info["total_time"] = round(total_time, 2)
     timing_info["context_length"] = len(final_context)
-    timing_info["results_count"] = {"methods": len(method_docs), "classes": len(class_docs)}
-    
+    timing_info["results_count"] = {"methods": len(
+        method_docs), "classes": len(class_docs)}
+
     return final_context, timing_info
 
 
 def extract_method_names_from_query(query: str, known_methods: List[str]) -> List[str]:
-                        q = query.lower()
-                        matched = []
-                        for m in known_methods:
-                            if re.search(rf'\b{re.escape(m.lower())}\b', q):
-                                matched.append(m)
-                        return matched
+    q = query.lower()
+    matched = []
+    for m in known_methods:
+        if re.search(rf'\b{re.escape(m.lower())}\b', q):
+            matched.append(m)
+    return matched
+
 
 def query_codebase(query: str, file_filters: list = None, selected_methods: list = None):
     """
     Query codebase using RAG with Supabase.
-    
+
     Args:
         query: User query string
         file_filters: Optional list of file paths to filter by
         selected_methods: Optional list of method names to extract variables from (for "list all variables")
-    
+
     Returns:
         dict: Response with answer and metadata
     """
@@ -729,7 +755,7 @@ def query_codebase(query: str, file_filters: list = None, selected_methods: list
                 'response': 'Please provide a query.',
                 'status': 'error'
             }
-        
+
         # Parse @filename.cs filters from query
         cleaned_query, cs_file_filters = parse_cs_file_filter(query)
         file_filters = file_filters or cs_file_filters
@@ -760,98 +786,107 @@ def query_codebase(query: str, file_filters: list = None, selected_methods: list
                     # Fall back to normal RAG flow if Supabase not available
                     import logging
                     logger = logging.getLogger(__name__)
-                    logger.warning("[Code Q&A Extract Full Code] Supabase not available, falling through to RAG")
+                    logger.warning(
+                        "[Code Q&A Extract Full Code] Supabase not available, falling through to RAG")
                     pass
                 else:
                     import logging
                     logger = logging.getLogger(__name__)
-                    logger.info(f"[Code Q&A Extract Full Code] Getting all chunks for file: {file_filters[0]}")
-                    
+                    logger.info(
+                        f"[Code Q&A Extract Full Code] Getting all chunks for file: {file_filters[0]}")
+
                     # Get only class chunks for this file (simplified - focus on classes first)
-                    all_class_chunks = get_code_chunks_for_files(file_filters, chunk_type='class')
-                    logger.info(f"[Code Q&A Extract Full Code] Found {len(all_class_chunks)} class chunk(s)")
-                    
+                    all_class_chunks = get_code_chunks_for_files(
+                        file_filters, chunk_type='class')
+                    logger.info(
+                        f"[Code Q&A Extract Full Code] Found {len(all_class_chunks)} class chunk(s)")
+
                     if not all_class_chunks:
-                        logger.warning(f"[Code Q&A Extract Full Code] No class chunks found in Supabase for {file_filters[0]}, falling through to RAG")
+                        logger.warning(
+                            f"[Code Q&A Extract Full Code] No class chunks found in Supabase for {file_filters[0]}, falling through to RAG")
                         pass
                     else:
                         # Extract source code from each class chunk
                         full_code_parts = []
                         seen_content = set()  # For deduplication
-                        
+
                         for class_chunk in all_class_chunks:
                             source_code = class_chunk.get('source_code', '')
                             if not source_code:
                                 continue
-                            
+
                             # Clean metadata headers while preserving indentation
                             lines = source_code.split('\n')
                             cleaned_lines = []
                             skip_next_empty = False
                             in_code = False
-                            
+
                             for line in lines:
                                 stripped = line.strip()
-                                
+
                                 # Skip "File: ..." lines
                                 if stripped.startswith('File:'):
                                     skip_next_empty = True
                                     continue
-                                
+
                                 # Skip empty line after "File:" line
                                 if skip_next_empty and not stripped:
                                     skip_next_empty = False
                                     continue
-                                
+
                                 # Skip metadata headers (Class:, Source Code:)
                                 if stripped and any(stripped.startswith(prefix) for prefix in ['Class:', 'Source Code:']):
                                     skip_next_empty = True
                                     in_code = True  # Code starts after header
                                     continue
-                                
+
                                 # Skip empty line after header
                                 if skip_next_empty and not stripped and not in_code:
                                     skip_next_empty = False
                                     continue
-                                
+
                                 skip_next_empty = False
                                 in_code = True
-                                cleaned_lines.append(line)  # Preserve original line with indentation
-                            
+                                # Preserve original line with indentation
+                                cleaned_lines.append(line)
+
                             # Join and clean up leading/trailing whitespace (but preserve internal indentation)
                             cleaned_code = '\n'.join(cleaned_lines).strip()
-                            
+
                             # Deduplicate: only add if we haven't seen this content before
                             if cleaned_code and cleaned_code not in seen_content:
                                 seen_content.add(cleaned_code)
                                 full_code_parts.append(cleaned_code)
-                        
+
                         # Combine all class chunks with proper spacing
                         if full_code_parts:
                             # Join with double newline to separate classes, but preserve internal structure
                             code_text = "\n\n".join(full_code_parts)
-                            
+
                             # Add file path at the top (only once)
                             file_path_header = f"File: {file_filters[0]}\n\n"
                             code_text = file_path_header + code_text
-                            
-                            logger.info(f"[Code Q&A Extract Full Code] Reconstructed file from {len(full_code_parts)} class chunk(s), total length: {len(code_text)} chars")
-                            
+
+                            logger.info(
+                                f"[Code Q&A Extract Full Code] Reconstructed file from {len(full_code_parts)} class chunk(s), total length: {len(code_text)} chars")
+
                             # Wrap full file in a single code block
                             return {
                                 "response": f"```csharp\n{code_text}\n```",
                                 "status": "success",
                                 "source_file": file_filters[0],
                             }
-                    
+
                     # If no chunks found, log and fall through to RAG
-                    logger.warning(f"[Code Q&A Extract Full Code] No chunks found in Supabase for {file_filters[0]}, falling through to RAG")
+                    logger.warning(
+                        f"[Code Q&A Extract Full Code] No chunks found in Supabase for {file_filters[0]}, falling through to RAG")
                     pass
             except Exception as e:
                 # On any error, fall back to normal RAG flow
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.warning(f"[Code Q&A Extract Full Code] Error extracting full code from Supabase, falling through to RAG: {e}")
+                logger.warning(
+                    f"[Code Q&A Extract Full Code] Error extracting full code from Supabase, falling through to RAG: {e}")
                 pass
 
         # 1b) Regex-based listing of methods / variables when exactly one file is selected.
@@ -881,8 +916,9 @@ def query_codebase(query: str, file_filters: list = None, selected_methods: list
         if selected_methods and len(selected_methods) > 0 and is_list_vars:
             # Check if global variables are requested
             include_global = "__GLOBAL_VARIABLES__" in selected_methods
-            actual_methods = [m for m in selected_methods if m != "__GLOBAL_VARIABLES__"]
-            
+            actual_methods = [
+                m for m in selected_methods if m != "__GLOBAL_VARIABLES__"]
+
             if include_global and actual_methods:
                 # Both global vars and methods selected
                 methods_str = ", ".join(actual_methods)
@@ -950,11 +986,11 @@ If no global variables are found in the provided class definitions, respond with
                 # Only methods selected (existing logic)
                 methods_str = ", ".join(actual_methods)
                 enhanced_query = f"List all variables used in the following methods: {methods_str}. Include local variables, parameters, and any fields/properties accessed within these methods. For each variable, show its name, type (if visible), and which method it belongs to."
-            
+
             cleaned_query = enhanced_query
             use_rag_for_variables = True
             # Skip regex override, fall through to RAG
-        
+
         if not use_rag_for_variables and single_file_selected and (is_list_methods or is_list_vars):
             # Use Supabase to get class and method chunks instead of reading from disk
             # This ensures it works on Render where files aren't on local disk
@@ -963,35 +999,47 @@ If no global variables are found in the provided class definitions, respond with
                     # Fall through to RAG if Supabase not available
                     import logging
                     logger = logging.getLogger(__name__)
-                    logger.warning("[Code Q&A Regex Override] Supabase not available, falling through to RAG")
+                    logger.warning(
+                        "[Code Q&A Regex Override] Supabase not available, falling through to RAG")
                     pass
                 else:
                     # Get class chunks from Supabase to extract methods and global variables
                     import logging
                     logger = logging.getLogger(__name__)
-                    logger.info(f"[Code Q&A Regex Override] Starting regex override for file: {file_filters[0]}")
-                    logger.info(f"[Code Q&A Regex Override] Query type: list_methods={is_list_methods}, list_vars={is_list_vars}")
-                    
-                    class_chunks = get_code_chunks_for_files(file_filters, chunk_type='class')
-                    method_chunks = get_code_chunks_for_files(file_filters, chunk_type='method')
-                    
-                    logger.info(f"[Code Q&A Regex Override] Found {len(class_chunks)} class chunks and {len(method_chunks)} method chunks from Supabase")
-                    
+                    logger.info(
+                        f"[Code Q&A Regex Override] Starting regex override for file: {file_filters[0]}")
+                    logger.info(
+                        f"[Code Q&A Regex Override] Query type: list_methods={is_list_methods}, list_vars={is_list_vars}")
+
+                    class_chunks = get_code_chunks_for_files(
+                        file_filters, chunk_type='class')
+                    method_chunks = get_code_chunks_for_files(
+                        file_filters, chunk_type='method')
+
+                    logger.info(
+                        f"[Code Q&A Regex Override] Found {len(class_chunks)} class chunks and {len(method_chunks)} method chunks from Supabase")
+
                     # Always try to extract methods and global variables, even if chunks are missing
                     # This allows us to show the method selection UI with whatever we can find
                     methods = []
                     fields = []
                     properties = []
-                    
+
                     if not class_chunks and not method_chunks:
                         # No chunks found in Supabase - try to diagnose why
                         import os
-                        filename = os.path.basename(file_filters[0]) if file_filters else "unknown"
-                        logger.warning(f"[Code Q&A Regex Override] No chunks found in Supabase for file: {file_filters[0]}")
-                        logger.warning(f"[Code Q&A Regex Override] Filename extracted: {filename}")
-                        logger.warning(f"[Code Q&A Regex Override] This file may not be indexed in Supabase, or the filename matching failed.")
-                        logger.warning(f"[Code Q&A Regex Override] Regex override requires source code from Supabase chunks - falling through to RAG")
-                        logger.warning(f"[Code Q&A Regex Override] NOTE: If this file should be indexed, please ensure it's been indexed in Supabase first.")
+                        filename = os.path.basename(
+                            file_filters[0]) if file_filters else "unknown"
+                        logger.warning(
+                            f"[Code Q&A Regex Override] No chunks found in Supabase for file: {file_filters[0]}")
+                        logger.warning(
+                            f"[Code Q&A Regex Override] Filename extracted: {filename}")
+                        logger.warning(
+                            f"[Code Q&A Regex Override] This file may not be indexed in Supabase, or the filename matching failed.")
+                        logger.warning(
+                            f"[Code Q&A Regex Override] Regex override requires source code from Supabase chunks - falling through to RAG")
+                        logger.warning(
+                            f"[Code Q&A Regex Override] NOTE: If this file should be indexed, please ensure it's been indexed in Supabase first.")
                         pass
                     else:
                         # Extract methods from method chunks
@@ -999,7 +1047,8 @@ If no global variables are found in the provided class definitions, respond with
                             method_name = method_chunk.get('method_name')
                             if method_name:
                                 # Try to extract line number from source_code if available
-                                source_code = method_chunk.get('code', '') or method_chunk.get('source_code', '')
+                                source_code = method_chunk.get(
+                                    'code', '') or method_chunk.get('source_code', '')
                                 line_num = 1  # Default if we can't determine
                                 if source_code:
                                     # Try to find method name in source code to get approximate line
@@ -1011,35 +1060,44 @@ If no global variables are found in the provided class definitions, respond with
                                                 break
                                     except Exception:
                                         line_num = 1
-                                
+
                                 methods.append({
                                     "name": method_name,
                                     "line": line_num
                                 })
-                                logger.debug(f"[Code Q&A Regex Override] Added method: {method_name} (line {line_num})")
-                        
+                                logger.debug(
+                                    f"[Code Q&A Regex Override] Added method: {method_name} (line {line_num})")
+
                         # Extract fields and properties from class chunks
                         for i, class_chunk in enumerate(class_chunks):
                             source_code = class_chunk.get('source_code', '')
-                            class_name = class_chunk.get('class_name', 'unknown')
+                            class_name = class_chunk.get(
+                                'class_name', 'unknown')
                             file_path = class_chunk.get('file_path', 'unknown')
-                            logger.info(f"[Code Q&A Regex Override] Processing class chunk {i+1}/{len(class_chunks)}: {class_name} from {file_path}, source_code length: {len(source_code)}")
-                            
+                            logger.info(
+                                f"[Code Q&A Regex Override] Processing class chunk {i+1}/{len(class_chunks)}: {class_name} from {file_path}, source_code length: {len(source_code)}")
+
                             if source_code:
                                 try:
                                     # Parse the class source_code to extract methods, fields, properties
-                                    parsed_methods, parsed_fields, parsed_properties = _analyze_csharp_file_symbols(source_code)
-                                    
-                                    logger.info(f"[Code Q&A Regex Override] Parsed from {class_name}: {len(parsed_methods)} methods, {len(parsed_fields)} fields, {len(parsed_properties)} properties")
-                                    
+                                    parsed_methods, parsed_fields, parsed_properties = _analyze_csharp_file_symbols(
+                                        source_code)
+
+                                    logger.info(
+                                        f"[Code Q&A Regex Override] Parsed from {class_name}: {len(parsed_methods)} methods, {len(parsed_fields)} fields, {len(parsed_properties)} properties")
+
                                     # Log field and property names for debugging
                                     if parsed_fields:
-                                        field_names = [f['name'] for f in parsed_fields]
-                                        logger.info(f"[Code Q&A Regex Override] Fields found: {field_names}")
+                                        field_names = [f['name']
+                                                       for f in parsed_fields]
+                                        logger.info(
+                                            f"[Code Q&A Regex Override] Fields found: {field_names}")
                                     if parsed_properties:
-                                        prop_names = [p['name'] for p in parsed_properties]
-                                        logger.info(f"[Code Q&A Regex Override] Properties found: {prop_names}")
-                                    
+                                        prop_names = [p['name']
+                                                      for p in parsed_properties]
+                                        logger.info(
+                                            f"[Code Q&A Regex Override] Properties found: {prop_names}")
+
                                     # Add methods (if not already added from method chunks)
                                     for m in parsed_methods:
                                         if not any(existing['name'] == m['name'] for existing in methods):
@@ -1048,42 +1106,53 @@ If no global variables are found in the provided class definitions, respond with
                                                 "name": m['name'],
                                                 "line": m.get('line', 1)
                                             })
-                                    
+
                                     # Add fields and properties
                                     fields.extend(parsed_fields)
                                     properties.extend(parsed_properties)
                                 except Exception as e:
-                                    logger.error(f"[Code Q&A Regex Override] Error parsing class chunk {class_name}: {e}")
+                                    logger.error(
+                                        f"[Code Q&A Regex Override] Error parsing class chunk {class_name}: {e}")
                                     import traceback
-                                    logger.error(f"[Code Q&A Regex Override] Traceback: {traceback.format_exc()}")
+                                    logger.error(
+                                        f"[Code Q&A Regex Override] Traceback: {traceback.format_exc()}")
                             else:
-                                logger.warning(f"[Code Q&A Regex Override] Class chunk {class_name} from {file_path} has empty source_code!")
-                        
-                        logger.info(f"[Code Q&A Regex Override] Final counts: {len(methods)} methods, {len(fields)} fields, {len(properties)} properties")
-                        
+                                logger.warning(
+                                    f"[Code Q&A Regex Override] Class chunk {class_name} from {file_path} has empty source_code!")
+
+                        logger.info(
+                            f"[Code Q&A Regex Override] Final counts: {len(methods)} methods, {len(fields)} fields, {len(properties)} properties")
+
                         # Only proceed if we found something (methods, fields, or properties)
                         if not (methods or fields or properties):
                             # No methods, fields, or properties found - fall through to RAG
-                            logger.warning(f"[Code Q&A Regex Override] No methods/fields/properties extracted from chunks, falling through to RAG")
-                            logger.warning(f"[Code Q&A Regex Override] This might indicate: 1) Chunks have empty source_code, 2) Regex parsing failed, 3) File has no methods/fields/properties")
+                            logger.warning(
+                                f"[Code Q&A Regex Override] No methods/fields/properties extracted from chunks, falling through to RAG")
+                            logger.warning(
+                                f"[Code Q&A Regex Override] This might indicate: 1) Chunks have empty source_code, 2) Regex parsing failed, 3) File has no methods/fields/properties")
                             pass
                         else:
-                            logger.info(f"[Code Q&A Regex Override] Successfully extracted symbols - proceeding with regex override (NOT falling through to RAG)")
+                            logger.info(
+                                f"[Code Q&A Regex Override] Successfully extracted symbols - proceeding with regex override (NOT falling through to RAG)")
                             method_names = [m["name"] for m in methods]
-                            requested_methods = extract_method_names_from_query(cleaned_query, method_names)
-                            
+                            requested_methods = extract_method_names_from_query(
+                                cleaned_query, method_names)
+
                             lines: List[str] = []
-                            file_name = file_filters[0].split('/')[-1] if file_filters else "Unknown"
+                            file_name = file_filters[0].split(
+                                '/')[-1] if file_filters else "Unknown"
                             lines.append(f"File: `{file_name}`")
 
                             if is_list_methods:
-                                lines.append("\n**Methods / Functions (all detected):**")
+                                lines.append(
+                                    "\n**Methods / Functions (all detected):**")
                                 if methods:
                                     for m in methods:
-                                        lines.append(f"- `{m['name']}` (line {m['line']})")
+                                        lines.append(
+                                            f"- `{m['name']}` (line {m['line']})")
                                 else:
                                     lines.append("- (no methods detected)")
-                                
+
                                 return {
                                     "response": "\n".join(lines),
                                     "status": "success",
@@ -1096,7 +1165,7 @@ If no global variables are found in the provided class definitions, respond with
                                     # Construct a query that asks RAG to extract variables from specified methods
                                     methods_str = ", ".join(requested_methods)
                                     enhanced_query = f"List all variables, fields, and properties used in the following methods: {methods_str}. Include local variables, parameters, and any fields/properties accessed within these methods. For each variable, show its name, type (if visible), and which method it belongs to."
-                                    
+
                                     # Update cleaned_query and set flag to skip return and use RAG
                                     cleaned_query = enhanced_query
                                     use_rag_for_variables = True
@@ -1120,15 +1189,18 @@ If no global variables are found in the provided class definitions, respond with
                                             "line": p['line'],
                                             "type": "property"
                                         })
-                                    
+
                                     import logging
                                     logger = logging.getLogger(__name__)
-                                    logger.info(f"[Code Q&A Regex Override] Building UI: {len(methods)} methods, {len(global_vars)} global variables")
-                                    logger.info(f"[Code Q&A Regex Override] Fields: {len(fields)}, Properties: {len(properties)}")
-                                    
+                                    logger.info(
+                                        f"[Code Q&A Regex Override] Building UI: {len(methods)} methods, {len(global_vars)} global variables")
+                                    logger.info(
+                                        f"[Code Q&A Regex Override] Fields: {len(fields)}, Properties: {len(properties)}")
+
                                     # Return special response format that triggers method selection UI
-                                    methods_list = [{"name": m["name"], "line": m["line"]} for m in methods]
-                                    
+                                    methods_list = [
+                                        {"name": m["name"], "line": m["line"]} for m in methods]
+
                                     # Ensure global_variables is always a list (never None or undefined)
                                     # Build appropriate message based on what we have
                                     if methods and global_vars:
@@ -1151,7 +1223,7 @@ If no global variables are found in the provided class definitions, respond with
                                             "You asked to list **all variables**.\n"
                                             "Please select which method(s) you want to see variables for."
                                         )
-                                    
+
                                     response_data = {
                                         "response": message,
                                         "status": "success",
@@ -1161,8 +1233,9 @@ If no global variables are found in the provided class definitions, respond with
                                         "global_variables": global_vars if global_vars else [],  # Always a list, never None
                                         "file_path": file_filters[0] if file_filters else None,
                                     }
-                                    
-                                    logger.info(f"[Code Q&A Regex Override] Response includes {len(response_data['global_variables'])} global variables")
+
+                                    logger.info(
+                                        f"[Code Q&A Regex Override] Response includes {len(response_data['global_variables'])} global variables")
                                     return response_data
                             else:
                                 # This should not happen since we check `elif methods or fields or properties`
@@ -1172,14 +1245,16 @@ If no global variables are found in the provided class definitions, respond with
                                     "\nThis file does not define any methods. Listing all "
                                     "fields/variables and properties in the file instead.\n"
                                 )
-                                lines.append("\n**Fields / Variables (all detected):**")
+                                lines.append(
+                                    "\n**Fields / Variables (all detected):**")
                                 if fields:
                                     for f in fields:
                                         lines.append(f"- `{f['name']}`")
                                 else:
                                     lines.append("- (no fields detected)")
 
-                                lines.append("\n**Properties (all detected):**")
+                                lines.append(
+                                    "\n**Properties (all detected):**")
                                 if properties:
                                     for p in properties:
                                         lines.append(f"- `{p['name']}`")
@@ -1195,53 +1270,57 @@ If no global variables are found in the provided class definitions, respond with
                 # Fall through to normal RAG flow on any error
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.warning(f"[Code Q&A] Error in regex override, falling through to RAG: {e}")
+                logger.warning(
+                    f"[Code Q&A] Error in regex override, falling through to RAG: {e}")
                 pass
 
         # Use Supabase if available
         if SUPABASE_AVAILABLE:
             try:
-                # COMMENTED OUT: Qwen usage - using OpenAI instead
-                # provider = QwenProvider()
                 from backend.services.llm_provider import SimpleLLMProvider
                 provider = SimpleLLMProvider()
-                
+
                 # Generate context
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.info(f"[Code Q&A Query] Query: {cleaned_query[:100]}")
                 logger.info(f"[Code Q&A Query] File filters: {file_filters}")
-                
+
                 # Check if this is a global variables query
                 is_global_vars_query = (
-                    use_rag_for_variables and 
-                    selected_methods and 
+                    use_rag_for_variables and
+                    selected_methods and
                     "__GLOBAL_VARIABLES__" in selected_methods
                 )
-                
+
                 context, context_timing = generate_context_supabase(
                     query=cleaned_query,
                     file_filters=file_filters,
                     provider=provider,
                     prioritize_class_chunks=is_global_vars_query
                 )
-                
-                logger.info(f"[Code Q&A Query] Context retrieved: {len(context)} chars")
-                logger.info(f"[Code Q&A Query] Context timing: {context_timing}")
-                
+
+                logger.info(
+                    f"[Code Q&A Query] Context retrieved: {len(context)} chars")
+                logger.info(
+                    f"[Code Q&A Query] Context timing: {context_timing}")
+
                 # Truncate context if needed
                 context_for_llm = context[:8000]
                 if len(context) > 8000:
                     context_for_llm = context[:8000]
-                
+
                 # Generate answer
                 if context_for_llm.strip():
-                    logger.info(f"[Code Q&A Query] Generating answer with context length: {len(context_for_llm)}")
-                    answer, answer_timing = openai_chat(cleaned_query, context_for_llm)
+                    logger.info(
+                        f"[Code Q&A Query] Generating answer with context length: {len(context_for_llm)}")
+                    answer, answer_timing = openai_chat(
+                        cleaned_query, context_for_llm)
                 else:
-                    logger.warning("[Code Q&A Query] Context is empty - returning 'No relevant code chunks' message")
+                    logger.warning(
+                        "[Code Q&A Query] Context is empty - returning 'No relevant code chunks' message")
                     answer = "No relevant code chunks found in the codebase."
-                
+
                 return {
                     'response': answer,
                     'status': 'success',
@@ -1250,7 +1329,7 @@ If no global variables are found in the provided class definitions, respond with
                         'answer': answer_timing
                     }
                 }
-                
+
             except Exception as e:
                 return {
                     'response': f'Error querying codebase: {str(e)}',
@@ -1261,7 +1340,7 @@ If no global variables are found in the provided class definitions, respond with
                 'response': 'Supabase is not configured for Code Q&A. Please configure SUPABASE_URL and SUPABASE_KEY.',
                 'status': 'error'
             }
-            
+
     except Exception as e:
         return {
             'response': f'Error: {str(e)}',
@@ -1273,23 +1352,24 @@ def list_indexed_files():
     """
     List all indexed code files.
     Uses Supabase ONLY - no local disk fallback (works on Render).
-    
+
     Returns:
         list: List of file metadata dictionaries with keys: file_name, file_path, normalized_path
     """
     import logging
     logger = logging.getLogger(__name__)
-    
+
     try:
         # Use Supabase only - no local disk fallback
         if not SUPABASE_AVAILABLE:
             logger.warning("Supabase not available - cannot list code files")
-            logger.warning("Set SUPABASE_URL and SUPABASE_KEY environment variables")
+            logger.warning(
+                "Set SUPABASE_URL and SUPABASE_KEY environment variables")
             return []
-        
+
         logger.info("Fetching code files from Supabase...")
         files = list_code_files_supabase()
-        
+
         if files:
             logger.info(f"✅ Retrieved {len(files)} code files from Supabase")
             # Ensure all files have the expected format
@@ -1304,11 +1384,12 @@ def list_indexed_files():
         else:
             logger.warning("⚠️  No code files found in Supabase")
             logger.warning("   This could mean:")
-            logger.warning("   1. The code_files table is empty (files haven't been indexed yet)")
+            logger.warning(
+                "   1. The code_files table is empty (files haven't been indexed yet)")
             logger.warning("   2. There's a connection issue with Supabase")
             logger.warning("   3. RLS policies are blocking access")
             return []
-        
+
     except Exception as e:
         logger.error(f"❌ Error listing code files from Supabase: {e}")
         import traceback

@@ -116,8 +116,6 @@ def run_code_upload_pipeline_async(job_id, file_bytes, filename):
         # Import required functions
         from backend.code_service import _analyze_csharp_file_symbols
         from backend.storage.code_supabase_storage import index_code_chunks_to_supabase
-        # COMMENTED OUT: Qwen usage - using OpenAI instead
-        # from gdd_rag_backbone.llm_providers import QwenProvider
         from backend.services.llm_provider import SimpleLLMProvider
         import re
 
@@ -240,8 +238,6 @@ def run_code_upload_pipeline_async(job_id, file_bytes, filename):
         update_job(job_id, step="Indexing to Supabase")
 
         # Initialize provider
-        # COMMENTED OUT: Qwen usage - using OpenAI instead
-        # provider = QwenProvider()
         provider = SimpleLLMProvider()
 
         total_chunks = 0
@@ -438,38 +434,6 @@ except ImportError as e:
     import traceback
     app.logger.error(f"Import traceback: {traceback.format_exc()}")
     code_service_available = False
-
-# Log all registered routes on startup
-
-
-def log_registered_routes():
-    """Log registered routes for debugging (safe: no recursion)."""
-    try:
-        with app.app_context():
-            app.logger.info("Registered routes:")
-            for rule in app.url_map.iter_rules():
-                if rule.rule.startswith('/api') or rule.rule in ['/', '/gdd', '/code', '/health']:
-                    methods = [m for m in rule.methods if m not in {
-                        'HEAD', 'OPTIONS'}]
-                    app.logger.info(f"  {rule.rule} [{', '.join(methods)}]")
-    except Exception as e:
-        app.logger.warning(f"Could not log routes: {e}")
-
-
-# Log routes after app is fully configured
-try:
-    log_registered_routes()
-    app.logger.info("=" * 60)
-    app.logger.info("App is ready to serve requests")
-    app.logger.info("=" * 60)
-
-except ImportError as e:
-    app.logger.error(f"[ERROR] Could not import Code service: {e}")
-    import traceback
-    app.logger.error(f"Import traceback: {traceback.format_exc()}")
-    code_service_available = False
-
-app.logger.info("=" * 60)
 
 
 @app.route('/')
