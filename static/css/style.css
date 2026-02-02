@@ -2650,6 +2650,203 @@ main {
     display: none;
 }
 
+/* Right Image Sidebar (View Images) */
+.preview-images-sidebar {
+    position: fixed;
+    top: 80px;
+    right: 0;
+    width: 0;
+    height: calc(100vh - 80px);
+    background: white;
+    border-left: 1px solid var(--border);
+    box-shadow: -4px 0 12px rgba(0, 0, 0, 0.06);
+    transition: width 0.3s ease-in-out;
+    z-index: 45;
+    overflow: hidden;
+}
+
+.preview-images-sidebar.open {
+    width: 320px;
+}
+
+.preview-images-sidebar-inner {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-width: 320px;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.preview-images-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.preview-images-sidebar-title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--foreground);
+    margin: 0;
+}
+
+.preview-images-sidebar-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.preview-images-sidebar-thumb {
+    position: relative;
+    cursor: pointer;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    border: 2px solid var(--border);
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.preview-images-sidebar-thumb:hover {
+    border-color: #999;
+    box-shadow: var(--shadow-md);
+}
+
+.preview-images-sidebar-thumb.selected {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.08);
+}
+
+.preview-images-sidebar-thumb-inner {
+    background: var(--muted);
+    aspect-ratio: 16/10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.preview-images-sidebar-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.preview-images-sidebar-thumb-caption {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.35);
+    color: white;
+    font-size: 0.6875rem;
+    padding: 6px 8px;
+}
+
+/* Expanded image modal */
+.preview-image-expanded-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 48px;
+}
+
+.preview-image-expanded-modal.hidden {
+    display: none;
+}
+
+.preview-image-expanded-close {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 2;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 50%;
+    padding: 10px;
+}
+
+.preview-image-expanded-close:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+.preview-image-expanded-wrap {
+    max-width: 100%;
+    max-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.preview-image-expanded-img {
+    max-width: 100%;
+    max-height: calc(100vh - 140px);
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: var(--radius-md);
+}
+
+/* Expanded image nav at bottom of screen */
+.preview-image-expanded-nav {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 20px 24px 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.5), transparent);
+}
+
+.preview-expanded-count {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.95);
+    text-align: center;
+}
+
+.preview-expanded-buttons {
+    display: flex;
+    gap: 12px;
+}
+
+.preview-expanded-nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.95);
+    border: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #333;
+    cursor: pointer;
+    transition: background-color 0.15s, opacity 0.15s;
+}
+
+.preview-expanded-nav-btn:hover:not(:disabled) {
+    background: white;
+}
+
+.preview-expanded-nav-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .preview-panel-title {
     display: flex;
     align-items: center;
