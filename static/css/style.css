@@ -2616,6 +2616,40 @@ main {
     flex-shrink: 0;
 }
 
+@keyframes jump {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+}
+
+.view-images-btn.jump-animate {
+    animation: jump 0.4s ease-in-out;
+}
+
+.view-images-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    background: #1a1a1a;
+    color: white;
+    border: none;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.15s, box-shadow 0.15s;
+    box-shadow: var(--shadow-md);
+}
+
+.view-images-btn:hover {
+    background: #333;
+    box-shadow: var(--shadow-lg);
+}
+
+.view-images-btn.hidden {
+    display: none;
+}
+
 .preview-panel-title {
     display: flex;
     align-items: center;

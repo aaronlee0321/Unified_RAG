@@ -136,13 +136,13 @@
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <button id="preview-full-doc-btn" class="preview-btn">
-                            <img src="{{ url_for('static', filename='icons/eye.svg') }}" width="12" height="12">
-                            <span>View Doc</span>
-                        </button>
-                        <button id="view-images-btn" class="preview-btn hidden" title="View images from this section">
-                            <img src="{{ url_for('static', filename='icons/file.svg') }}" width="12" height="12">
+                        <button type="button" id="view-images-btn" class="view-images-btn hidden" title="View images from this chunk">
+                            <img src="{{ url_for('static', filename='icons/image-16.png') }}" width="16" height="16" alt="" style="filter: brightness(0) invert(1);">
                             <span>View Images</span>
+                        </button>
+                        <button type="button" id="preview-full-doc-btn" class="view-images-btn" title="View full document">
+                            <img src="{{ url_for('static', filename='icons/eye.svg') }}" width="14" height="14" style="filter: brightness(0) invert(1);">
+                            <span>View Doc</span>
                         </button>
                         <button id="close-preview-btn" class="action-btn" title="Close preview">
                             <img src="{{ url_for('static', filename='icons/close.svg') }}" width="16" height="16"
