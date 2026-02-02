@@ -1,10 +1,10 @@
 """
 Simple LLM provider wrapper for keyword extractor.
-Uses OpenAI-compatible APIs.
+Uses OpenAI-compatible APIs for both LLM and embeddings.
 """
 import os
 import logging
-from typing import Optional
+from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +56,34 @@ class SimpleLLMProvider:
                 "OPENAI_BASE_URL") or "https://api.openai.com/v1"
 
         self.model = model or os.getenv("LLM_MODEL") or "gpt-4o-mini"
+        # Embedding model: prefer OpenAI embedding (e.g. text-embedding-3-small) when using OpenAI
+        self.embedding_model = os.getenv("EMBEDDING_MODEL") or os.getenv(
+            "OPENAI_EMBEDDING_MODEL") or "text-embedding-3-small"
         logger.info(
-            f"[LLM Provider] Using OpenAI-compatible endpoint: {self.base_url} model={self.model}")
+            f"[LLM Provider] Using OpenAI-compatible endpoint: {self.base_url} model={self.model} embedding={self.embedding_model}")
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        """
+        Generate embeddings using OpenAI-compatible embeddings API.
+
+        Args:
+            texts: List of text strings to embed
+
+        Returns:
+            List of embedding vectors (list of floats per text)
+        """
+        if not texts:
+            return []
+        try:
+            response = self.client.embeddings.create(
+                model=self.embedding_model,
+                input=texts,
+                encoding_format="float",
+            )
+            return [item.embedding for item in response.data]
+        except Exception as e:
+            raise RuntimeError(f"Embedding API error: {str(e)}") from e
 
     def llm(
         self,

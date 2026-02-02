@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const gddOpenOriginalBtn = document.getElementById('gdd-open-original-btn');
     const gddDownloadBtn = document.getElementById('gdd-download-btn');
     const documentViewerResizeHandle = document.getElementById('gdd-document-viewer-resize-handle');
+    const gddSidebarResizeHandle = document.getElementById('gdd-sidebar-resize-handle');
 
     const DOC_VIEWER_MIN_WIDTH = 384;  // Same as right preview panel
     const DOC_VIEWER_DEFAULT_WIDTH = 600;
@@ -151,6 +152,52 @@ document.addEventListener('DOMContentLoaded', function() {
             documentViewerResizeHandle.addEventListener('pointerup', onUp);
             documentViewerResizeHandle.addEventListener('pointercancel', onUp);
         });
+    }
+
+    // GDD left sidebar resize: drag to change width; names wrap when sidebar is wider
+    const GDD_SIDEBAR_MIN_WIDTH = 288;
+    const GDD_SIDEBAR_MAX_WIDTH = 800;
+    if (sidebar && gddSidebarResizeHandle) {
+        let gddSidebarResizing = false;
+        let gddSidebarStartX = 0;
+        let gddSidebarStartWidth = 0;
+
+        gddSidebarResizeHandle.addEventListener('mousedown', function (e) {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            gddSidebarResizing = true;
+            gddSidebarStartX = e.clientX;
+            gddSidebarStartWidth = sidebar.offsetWidth;
+            gddSidebarResizeHandle.classList.add('resizing');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', function (e) {
+            if (!gddSidebarResizing) return;
+            const delta = e.clientX - gddSidebarStartX;
+            let newWidth = gddSidebarStartWidth + delta;
+            newWidth = Math.max(GDD_SIDEBAR_MIN_WIDTH, Math.min(GDD_SIDEBAR_MAX_WIDTH, newWidth));
+            sidebar.style.width = newWidth + 'px';
+        });
+
+        document.addEventListener('mouseup', function () {
+            if (gddSidebarResizing) {
+                gddSidebarResizing = false;
+                gddSidebarResizeHandle.classList.remove('resizing');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                sessionStorage.setItem('gdd_sidebar_width', String(sidebar.offsetWidth));
+            }
+        });
+
+        const savedGddSidebarWidth = sessionStorage.getItem('gdd_sidebar_width');
+        if (savedGddSidebarWidth) {
+            const w = parseInt(savedGddSidebarWidth, 10);
+            if (w >= GDD_SIDEBAR_MIN_WIDTH && w <= GDD_SIDEBAR_MAX_WIDTH) {
+                sidebar.style.width = w + 'px';
+            }
+        }
     }
 
     // Drag & Drop
@@ -1407,7 +1454,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         // Show all sections if no search term, otherwise show filtered
-        const sectionsToShow = searchTerm.length > 0 ? filtered : documentSections.slice(0, 20); // Limit to 20 for performance
+        const sectionsToShow = searchTerm.length > 0 ? filtered : documentSections;
         
         if (sectionsToShow.length === 0) {
             console.log('[Section Dropdown] No sections match search term:', searchTerm);
@@ -1452,7 +1499,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Position dropdown ABOVE the input (fixed positioning is relative to viewport)
         const inputRect = queryInput.getBoundingClientRect();
-        const dropdownHeight = 200; // Max height for dropdown
+        const dropdownHeight = 400; // Max height for dropdown (scrollable)
         
         sectionDropdown.style.display = 'block';
         sectionDropdown.style.position = 'fixed';

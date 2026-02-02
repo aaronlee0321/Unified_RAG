@@ -510,6 +510,18 @@ main {
     border-right: none;
 }
 
+#gdd-sidebar {
+    position: relative;
+}
+
+#gdd-sidebar .document-item .name {
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    overflow: visible;
+    text-overflow: unset;
+}
+
 .sidebar-content {
     width: 288px;
     height: 100%;
