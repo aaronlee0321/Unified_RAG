@@ -1080,6 +1080,7 @@ def explainer_preview():
         if not markdown_chunks:
             return jsonify({
                 'summary': f'No content found for section "{section_heading}" in document "{doc_name or doc_id}".',
+                'raw_content': '',
                 'success': True
             })
 
@@ -1128,6 +1129,8 @@ Provide a clear, comprehensive summary of this section. Include all key informat
 
         return jsonify({
             'summary': summary,
+            # Chunk content for View Images (extract image URLs)
+            'raw_content': chunk_texts_enhanced,
             'success': True
         })
 

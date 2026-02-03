@@ -1616,18 +1616,11 @@ document.addEventListener('DOMContentLoaded', function () {
             if (previewDocNameEl) previewDocNameEl.textContent = docName;
             if (previewSectionTitleEl) previewSectionTitleEl.textContent = sectionTitle;
 
-            // Store image URLs for "View Images" sidebar; show button only when chunk has images
-            previewImageUrls = extractImageUrlsFromContent(content);
-            const viewImagesBtn = document.getElementById('view-images-btn');
-            if (viewImagesBtn) {
-                if (previewImageUrls.length > 0) {
-                    viewImagesBtn.classList.remove('hidden');
-                    currentImageIndex = 0;
-                } else {
-                    viewImagesBtn.classList.add('hidden');
-                }
-            }
+            // View Images button and previewImageUrls are set from API response (single source of truth for both document-list and citation paths)
+            previewImageUrls = [];
             closeImageSidebar();
+            const viewImagesBtn = document.getElementById('view-images-btn');
+            if (viewImagesBtn) viewImagesBtn.classList.add('hidden');
 
             // Show loading state (matching v0 style)
             previewContent.innerHTML = `
@@ -1666,6 +1659,18 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (result.success && result.summary) {
                     // Format and display the summary (similar to chatbox response)
                     previewContent.innerHTML = formatPreviewContent(result.summary);
+                    // Single source of truth: set View Images from API raw_content (works for both document-list and citation paths)
+                    const rawContent = result.raw_content || '';
+                    previewImageUrls = extractImageUrlsFromContent(rawContent);
+                    currentImageIndex = 0;
+                    const viewImagesBtnEl = document.getElementById('view-images-btn');
+                    if (viewImagesBtnEl) {
+                        if (previewImageUrls.length > 0) {
+                            viewImagesBtnEl.classList.remove('hidden');
+                        } else {
+                            viewImagesBtnEl.classList.add('hidden');
+                        }
+                    }
                 } else {
                     previewContent.innerHTML = `<p class="placeholder-text" style="color: var(--status-error);">Error: ${result.error || 'Failed to generate summary'}</p>`;
                 }
