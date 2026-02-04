@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Unified RAG Logo" width="220" />
+  <img src="assets/logo.png" alt="Unified RAG – From Design Docs to Decisions, Built for GDDs" width="800" />
 </p>
-
-# Unified RAG
 
 A web app that combines **GDD RAG** (document Q&A), **Code Q&A**, and **Keyword Finder** in one place. Upload PDFs and code, search by keyword, and ask questions with AI-backed answers.
 
