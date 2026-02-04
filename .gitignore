@@ -77,3 +77,7 @@ tank_online_1-dev/
 *.svg
 *.tiff
 *.tif
+
+# README assets – allow logo and screenshots in repo
+!assets/
+!assets/*.png

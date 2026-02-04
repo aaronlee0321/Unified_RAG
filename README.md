@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Unified RAG Logo" width="120" />
+</p>
+
 # Unified RAG
 
 A web app that combines **GDD RAG** (document Q&A), **Code Q&A**, and **Keyword Finder** in one place. Upload PDFs and code, search by keyword, and ask questions with AI-backed answers.
@@ -34,7 +38,16 @@ A web app that combines **GDD RAG** (document Q&A), **Code Q&A**, and **Keyword 
 
    Open **http://localhost:5000** in your browser.
 
-For step-by-step setup (Supabase, bucket, env vars, troubleshooting), see **[SETUP.md](SETUP.md)**.
+---
+
+## Useful links
+
+| Link                                   | Description                                                     |
+| -------------------------------------- | --------------------------------------------------------------- |
+| [Setup guide](SETUP.md)                | Step-by-step setup: Supabase, bucket, env vars, troubleshooting |
+| [Supabase schema](supabase_deploy.sql) | SQL to run in Supabase SQL Editor (tables, pgvector, indexes)   |
+| [Environment template](.env.example)   | Copy to `.env` and fill in API keys and Supabase URL/key        |
+| [Requirements](requirements.txt)       | Python dependencies                                             |
 
 ---
 
@@ -43,6 +56,22 @@ For step-by-step setup (Supabase, bucket, env vars, troubleshooting), see **[SET
 - **Backend:** Flask, Python 3.11
 - **Storage:** Supabase (Postgres, pgvector, Storage)
 - **LLM / embeddings:** OpenAI-compatible API (OpenAI, Qwen/DashScope, or Ollama)
+
+---
+
+## Screenshots
+
+**GDD RAG** – Document list and RAG assistant:
+
+<p align="center">
+  <img src="assets/screenshot-gdd-rag.png" alt="GDD RAG screenshot" width="800" />
+</p>
+
+**Keyword Finder** – Search by keyword, view sections, generate explanations:
+
+<p align="center">
+  <img src="assets/screenshot-keyword-finder.png" alt="Keyword Finder screenshot" width="800" />
+</p>
 
 ---
 
