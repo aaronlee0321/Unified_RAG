@@ -130,7 +130,9 @@ class GddRequirement:
     triggers: List[str] = field(default_factory=list)
     effects: List[str] = field(default_factory=list)
     entities_involved: List[str] = field(default_factory=list)
-    expected_code_anchors: List[str] = field(default_factory=list)  # e.g., ["Class.Method", "OtherClass.fn"]
+    expected_code_anchors: List[str] = field(
+        default_factory=list
+    )  # e.g., ["Class.Method", "OtherClass.fn"]
 
     def to_dict(self) -> dict:
         return asdict(self)

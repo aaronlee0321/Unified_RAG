@@ -8,10 +8,11 @@ import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Iterable
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 try:
     from rank_bm25 import BM25Okapi
+
     BM25_AVAILABLE = True
 except ImportError:
     BM25_AVAILABLE = False
@@ -19,6 +20,7 @@ except ImportError:
 
 try:
     from sentence_transformers import CrossEncoder
+
     CROSS_ENCODER_AVAILABLE = True
 except ImportError:
     CROSS_ENCODER_AVAILABLE = False
@@ -51,6 +53,7 @@ class ChunkRecord:
 # Storage helpers
 # ---------------------------------------------------------------------------
 
+
 def _load_json(path: Path) -> dict:
     if not path.exists():
         raise ChunkStoreError(f"Expected store not found: {path}")
@@ -66,11 +69,7 @@ def load_doc_status() -> Dict[str, dict]:
         data = _load_json(STATUS_PATH)
     except ChunkStoreError:
         return {}
-    return {
-        doc_id: meta
-        for doc_id, meta in data.items()
-        if isinstance(meta, dict)
-    }
+    return {doc_id: meta for doc_id, meta in data.items() if isinstance(meta, dict)}
 
 
 def list_indexed_docs() -> List[dict]:
@@ -123,6 +122,7 @@ def preview_chunks(doc_id: str, limit: int = 3) -> List[ChunkRecord]:
 # Embedding + scoring helpers
 # ---------------------------------------------------------------------------
 
+
 def _normalize_vector(vec: Sequence[float]) -> List[float]:
     """Normalize a vector to unit length for faster cosine similarity."""
     norm = math.sqrt(sum(x * x for x in vec))
@@ -134,21 +134,21 @@ def _normalize_vector(vec: Sequence[float]) -> List[float]:
 def _cosine_similarity(vec_a: Sequence[float], vec_b: Sequence[float]) -> float:
     """
     Calculate cosine similarity between two vectors.
-    
+
     Optimized: Assumes vectors are pre-normalized (unit length).
     If not normalized, falls back to full calculation.
     """
     # Fast path: dot product if vectors are normalized (norm ≈ 1.0)
     dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    
+
     # Check if vectors are already normalized (within tolerance)
     norm_a_sq = sum(a * a for a in vec_a)
     norm_b_sq = sum(b * b for b in vec_b)
-    
+
     # If both vectors are approximately normalized, use dot product directly
     if abs(norm_a_sq - 1.0) < 0.01 and abs(norm_b_sq - 1.0) < 0.01:
         return float(dot)
-    
+
     # Fallback: full cosine similarity calculation
     norm_a = math.sqrt(norm_a_sq)
     norm_b = math.sqrt(norm_b_sq)
@@ -160,7 +160,7 @@ def _cosine_similarity(vec_a: Sequence[float], vec_b: Sequence[float]) -> float:
 def _ensure_float_vector(raw: Iterable) -> Optional[List[float]]:
     """
     Convert raw vector to List[float] with float32 precision.
-    
+
     Uses float32 instead of float64 for better memory usage and cache performance.
     """
     vector: List[float] = []
@@ -183,18 +183,18 @@ def _ensure_float_vector(raw: Iterable) -> Optional[List[float]]:
 
 def _normalize_question(question: str) -> str:
     """Normalize question for caching (lowercase, strip, remove extra spaces)."""
-    return ' '.join(question.lower().strip().split())
+    return " ".join(question.lower().strip().split())
 
 
 def _embed_texts(provider, texts: Sequence[str], use_cache: bool = True) -> List[List[float]]:
     """
     Embed texts with optional caching for queries.
-    
+
     Args:
         provider: Embedding provider
         texts: Texts to embed
         use_cache: If True, cache single query embeddings (for questions)
-    
+
     Returns:
         List of embedding vectors
     """
@@ -206,7 +206,7 @@ def _embed_texts(provider, texts: Sequence[str], use_cache: bool = True) -> List
             embedding = _QUERY_EMBEDDING_CACHE.pop(normalized)
             _QUERY_EMBEDDING_CACHE[normalized] = embedding
             return [embedding]
-    
+
     # Generate embeddings
     raw_embeddings = provider.embed(list(texts))
     floats: List[List[float]] = []
@@ -217,7 +217,7 @@ def _embed_texts(provider, texts: Sequence[str], use_cache: bool = True) -> List
         if not float_embedding:
             raise ValueError("Embedding provider returned invalid vector values")
         floats.append(float_embedding)
-    
+
     # Cache single query embedding
     if use_cache and len(texts) == 1:
         normalized = _normalize_question(texts[0])
@@ -225,18 +225,18 @@ def _embed_texts(provider, texts: Sequence[str], use_cache: bool = True) -> List
         # Enforce LRU cache size limit
         if len(_QUERY_EMBEDDING_CACHE) > _QUERY_CACHE_SIZE:
             _QUERY_EMBEDDING_CACHE.popitem(last=False)  # Remove oldest
-    
+
     return floats
 
 
 def _load_chunk_vectors(doc_ids: Sequence[str], normalize: bool = True) -> Dict[str, List[float]]:
     """
     Load chunk vectors, optionally pre-normalizing them for faster cosine similarity.
-    
+
     Args:
         doc_ids: Document IDs to load vectors for
         normalize: If True, pre-normalize vectors (optimization for cosine similarity)
-    
+
     Returns:
         Dictionary mapping chunk_id to vector (normalized if normalize=True)
     """
@@ -265,7 +265,7 @@ def _load_chunk_vectors(doc_ids: Sequence[str], normalize: bool = True) -> Dict[
 def _tokenize(text: str) -> List[str]:
     """Tokenize text for BM25 (simple word-based tokenization)."""
     # Convert to lowercase and split on whitespace and punctuation
-    tokens = re.findall(r'\b\w+\b', text.lower())
+    tokens = re.findall(r"\b\w+\b", text.lower())
     return tokens
 
 
@@ -274,17 +274,17 @@ def _score_chunks_bm25(question: str, chunks: List[ChunkRecord]) -> List[Tuple[f
     if not BM25_AVAILABLE or not chunks:
         # Fallback to simple text-based scoring
         return _score_chunks_text_based(question, chunks)
-    
+
     # Tokenize question and chunks
     question_tokens = _tokenize(question)
     chunk_texts = [_tokenize(record.content) for record in chunks]
-    
+
     # Initialize BM25
     bm25 = BM25Okapi(chunk_texts)
-    
+
     # Get BM25 scores (returns numpy array)
     scores = bm25.get_scores(question_tokens)
-    
+
     # Convert to Python floats and normalize to 0-1 range
     if len(scores) > 0:
         min_score = float(min(scores))
@@ -293,32 +293,34 @@ def _score_chunks_bm25(question: str, chunks: List[ChunkRecord]) -> List[Tuple[f
             scores = [float((s - min_score) / (max_score - min_score)) for s in scores]
         else:
             scores = [1.0] * len(scores)
-    
+
     scored = [(float(score), record) for score, record in zip(scores, chunks)]
     scored.sort(key=lambda item: item[0], reverse=True)
     return scored
 
 
-def _score_chunks_text_based(question: str, chunks: List[ChunkRecord]) -> List[Tuple[float, ChunkRecord]]:
+def _score_chunks_text_based(
+    question: str, chunks: List[ChunkRecord]
+) -> List[Tuple[float, ChunkRecord]]:
     """Fallback text-based scoring when embeddings fail."""
     question_lower = question.lower()
     question_words = set(question_lower.split())
-    
+
     scored: List[Tuple[float, ChunkRecord]] = []
     for record in chunks:
         content_lower = record.content.lower()
         content_words = set(content_lower.split())
-        
+
         # Simple word overlap score
         if question_words:
             overlap = len(question_words & content_words) / len(question_words)
         else:
             overlap = 0.0
-        
+
         # Bonus for exact phrase matches
         if question_lower in content_lower:
             overlap += 0.5
-        
+
         scored.append((overlap, record))
     scored.sort(key=lambda item: item[0], reverse=True)
     return scored
@@ -335,13 +337,13 @@ def _score_chunks_hybrid_rrf(
 ) -> List[Tuple[float, ChunkRecord]]:
     """
     Hybrid retrieval using RRF (Reciprocal Rank Fusion).
-    
+
     Algorithm:
     1. Retrieve top N chunks using dense (cosine similarity)
     2. Retrieve top N chunks using sparse (BM25)
     3. Apply RRF formula: score = sum(1/(k + rank_i)) for each method
     4. Return fused rankings
-    
+
     Args:
         question_embedding: Dense embedding of the question
         chunks: List of chunks to score
@@ -350,13 +352,13 @@ def _score_chunks_hybrid_rrf(
         question_text: Question text for BM25 scoring
         k: RRF constant (default: 60)
         top_n_each: Number of top results to retrieve from each method (default: 12, optimized for speed)
-    
+
     Returns:
         List of (rrf_score, ChunkRecord) tuples sorted by RRF score
     """
     # Get dense scores (cosine similarity)
     dense_ranking: Dict[str, int] = {}  # chunk_id -> rank (0-based)
-    
+
     if question_embedding is not None:
         missing_records = [record for record in chunks if record.chunk_id not in vectors]
         if missing_records:
@@ -383,44 +385,44 @@ def _score_chunks_hybrid_rrf(
             # Fast cosine similarity (both vectors are normalized, so just dot product)
             score = _cosine_similarity(question_embedding, embedding)
             dense_scored.append((float(score), record))
-        
+
         # Sort and take top N
         dense_scored.sort(key=lambda item: item[0], reverse=True)
         for rank, (_, record) in enumerate(dense_scored[:top_n_each]):
             dense_ranking[record.chunk_id] = rank
-    
+
     # Get sparse scores (BM25)
     sparse_ranking: Dict[str, int] = {}  # chunk_id -> rank (0-based)
-    
+
     if question_text:
         bm25_scored = _score_chunks_bm25(question_text, chunks)
         for rank, (_, record) in enumerate(bm25_scored[:top_n_each]):
             sparse_ranking[record.chunk_id] = rank
-    
+
     # Apply RRF fusion
     rrf_scores: Dict[str, float] = {}
     all_chunk_ids = set(dense_ranking.keys()) | set(sparse_ranking.keys())
-    
+
     for chunk_id in all_chunk_ids:
         rrf_score = 0.0
-        
+
         # Add dense contribution
         if chunk_id in dense_ranking:
             rrf_score += 1.0 / (k + dense_ranking[chunk_id])
-        
+
         # Add sparse contribution
         if chunk_id in sparse_ranking:
             rrf_score += 1.0 / (k + sparse_ranking[chunk_id])
-        
+
         rrf_scores[chunk_id] = float(rrf_score)
-    
+
     # Create final scored list
     chunk_map = {record.chunk_id: record for record in chunks}
     rrf_scored: List[Tuple[float, ChunkRecord]] = []
     for chunk_id, score in rrf_scores.items():
         if chunk_id in chunk_map:
             rrf_scored.append((score, chunk_map[chunk_id]))
-    
+
     rrf_scored.sort(key=lambda item: item[0], reverse=True)
     return rrf_scored
 
@@ -435,12 +437,12 @@ def _score_chunks_hybrid(
     """
     Hybrid retrieval: Combine dense (cosine similarity) + sparse (BM25) scores.
     Returns scored chunks with combined scores.
-    
+
     DEPRECATED: Use _score_chunks_hybrid_rrf() for better fusion.
     """
     # Get dense scores (cosine similarity)
     dense_scores: Dict[str, float] = {}
-    
+
     if question_embedding is not None:
         missing_records = [record for record in chunks if record.chunk_id not in vectors]
         if missing_records:
@@ -466,19 +468,19 @@ def _score_chunks_hybrid(
             # Fast cosine similarity (both vectors are normalized, so just dot product)
             score = _cosine_similarity(question_embedding, embedding)
             dense_scores[record.chunk_id] = score
-    
+
     # Get sparse scores (BM25)
     if question_text:
         bm25_scored = _score_chunks_bm25(question_text, chunks)
         sparse_scores: Dict[str, float] = {record.chunk_id: score for score, record in bm25_scored}
     else:
         sparse_scores = {record.chunk_id: 0.0 for record in chunks}
-    
+
     # Combine scores: weighted average (60% dense, 40% sparse)
     # If dense scores unavailable, use only sparse
     if not dense_scores:
         return bm25_scored if question_text else [(1.0, record) for record in chunks]
-    
+
     # Normalize dense scores to 0-1 if needed
     if dense_scores:
         max_dense = float(max(dense_scores.values())) if dense_scores.values() else 1.0
@@ -488,7 +490,7 @@ def _score_chunks_hybrid(
                 chunk_id: float((score - min_dense) / (max_dense - min_dense))
                 for chunk_id, score in dense_scores.items()
             }
-    
+
     # Normalize sparse scores to 0-1 if needed
     if sparse_scores:
         max_sparse = float(max(sparse_scores.values())) if sparse_scores.values() else 1.0
@@ -498,7 +500,7 @@ def _score_chunks_hybrid(
                 chunk_id: float((score - min_sparse) / (max_sparse - min_sparse))
                 for chunk_id, score in sparse_scores.items()
             }
-    
+
     # Combine: 60% dense, 40% sparse
     combined_scores: List[Tuple[float, ChunkRecord]] = []
     for record in chunks:
@@ -506,7 +508,7 @@ def _score_chunks_hybrid(
         sparse = float(sparse_scores.get(record.chunk_id, 0.0))
         combined = float(0.6 * dense + 0.4 * sparse)
         combined_scores.append((combined, record))
-    
+
     combined_scores.sort(key=lambda item: item[0], reverse=True)
     return combined_scores
 
@@ -521,12 +523,14 @@ def _score_chunks(
 ) -> List[Tuple[float, ChunkRecord]]:
     """
     Score chunks using hybrid retrieval (dense + sparse).
-    
+
     Args:
         use_rrf: If True, use RRF fusion (recommended). If False, use weighted combination.
     """
     if use_rrf:
-        return _score_chunks_hybrid_rrf(question_embedding, chunks, vectors, provider, question_text)
+        return _score_chunks_hybrid_rrf(
+            question_embedding, chunks, vectors, provider, question_text
+        )
     else:
         return _score_chunks_hybrid(question_embedding, chunks, vectors, provider, question_text)
 
@@ -541,7 +545,7 @@ def _get_cross_encoder():
     if _cross_encoder_model is None and CROSS_ENCODER_AVAILABLE:
         try:
             # Use a lightweight cross-encoder model
-            _cross_encoder_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+            _cross_encoder_model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
         except Exception:
             _cross_encoder_model = False  # Mark as unavailable
     return _cross_encoder_model if _cross_encoder_model is not False else None
@@ -558,17 +562,21 @@ def _rerank_with_llm(
     """
     if not scored_chunks or top_n <= 0:
         return scored_chunks
-    
+
     # Take top N for LLM re-ranking (to save tokens)
-    top_chunks = scored_chunks[:min(top_n, len(scored_chunks))]
-    
+    top_chunks = scored_chunks[: min(top_n, len(scored_chunks))]
+
     try:
         # Create prompt for LLM to score relevance
-        chunk_list = "\n".join([
-            f"[{i+1}] {record.content[:200]}..." if len(record.content) > 200 else f"[{i+1}] {record.content}"
-            for i, (_, record) in enumerate(top_chunks)
-        ])
-        
+        chunk_list = "\n".join(
+            [
+                f"[{i + 1}] {record.content[:200]}..."
+                if len(record.content) > 200
+                else f"[{i + 1}] {record.content}"
+                for i, (_, record) in enumerate(top_chunks)
+            ]
+        )
+
         prompt = (
             f"Given the question: '{question}'\n\n"
             f"Rank the following chunks by relevance (1 = most relevant, {len(top_chunks)} = least relevant). "
@@ -576,16 +584,16 @@ def _rerank_with_llm(
             f"{chunk_list}\n\n"
             f"Ranking (comma-separated numbers):"
         )
-        
+
         response = provider.llm(prompt=prompt, max_tokens=50)
-        
+
         # Parse ranking from response
         # Extract numbers from response
-        numbers = re.findall(r'\d+', response)
+        numbers = re.findall(r"\d+", response)
         if len(numbers) == len(top_chunks):
             # Create mapping: original index -> rank (lower is better)
             rank_map = {int(num) - 1: idx for idx, num in enumerate(numbers)}
-            
+
             # Convert ranks to scores (inverse: rank 1 = score 1.0, rank N = score 0.1)
             reranked: List[Tuple[float, ChunkRecord]] = []
             for orig_idx, (orig_score, record) in enumerate(top_chunks):
@@ -595,13 +603,13 @@ def _rerank_with_llm(
                 # Combine: 40% original, 60% LLM
                 combined_score = 0.4 * orig_score + 0.6 * llm_score
                 reranked.append((combined_score, record))
-            
+
             reranked.sort(key=lambda item: item[0], reverse=True)
-            remaining = scored_chunks[len(top_chunks):]
+            remaining = scored_chunks[len(top_chunks) :]
             return reranked + remaining
     except Exception:
         pass
-    
+
     # If LLM re-ranking fails, return original
     return scored_chunks
 
@@ -616,37 +624,39 @@ def _rerank_with_cross_encoder(
     """
     Re-rank top chunks using cross-encoder for more accurate relevance scoring.
     Falls back to LLM re-ranking if cross-encoder unavailable, then to original scores.
-    
+
     Optimization: Skips reranking if top similarity score is already high enough.
     """
     if not scored_chunks:
         return scored_chunks
-    
+
     # Early exit: Skip reranking if top score is already very high (optimization #3)
     if scored_chunks and scored_chunks[0][0] >= skip_if_high_score:
         return scored_chunks
-    
+
     # Early exit: Skip reranking if we have very few candidates
     if len(scored_chunks) <= 3:
         return scored_chunks
-    
+
     # Take top N for re-ranking (to save computation)
-    top_chunks = scored_chunks[:min(top_n, len(scored_chunks))]
-    
+    top_chunks = scored_chunks[: min(top_n, len(scored_chunks))]
+
     cross_encoder = _get_cross_encoder()
     if not cross_encoder:
         # Fallback to LLM re-ranking if cross-encoder unavailable
         if provider:
-            return _rerank_with_llm(question, scored_chunks, provider, top_n=min(10, len(top_chunks)))
+            return _rerank_with_llm(
+                question, scored_chunks, provider, top_n=min(10, len(top_chunks))
+            )
         return scored_chunks  # Return original if both unavailable
-    
+
     try:
         # Prepare pairs for cross-encoder
         pairs = [(question, record.content) for _, record in top_chunks]
-        
+
         # Get cross-encoder scores
         rerank_scores = cross_encoder.predict(pairs)
-        
+
         # Normalize scores to 0-1
         if rerank_scores:
             min_score = float(min(rerank_scores))
@@ -655,23 +665,25 @@ def _rerank_with_cross_encoder(
                 rerank_scores = [(s - min_score) / (max_score - min_score) for s in rerank_scores]
             else:
                 rerank_scores = [1.0] * len(rerank_scores)
-        
+
         # Combine original hybrid score (30%) with cross-encoder score (70%)
         reranked: List[Tuple[float, ChunkRecord]] = []
         for (orig_score, record), rerank_score in zip(top_chunks, rerank_scores):
             combined_score = 0.3 * orig_score + 0.7 * rerank_score
             reranked.append((combined_score, record))
-        
+
         # Sort by combined score
         reranked.sort(key=lambda item: item[0], reverse=True)
-        
+
         # Combine with remaining chunks (not re-ranked)
-        remaining = scored_chunks[len(top_chunks):]
+        remaining = scored_chunks[len(top_chunks) :]
         return reranked + remaining
     except Exception:
         # If cross-encoder fails, try LLM fallback
         if provider:
-            return _rerank_with_llm(question, scored_chunks, provider, top_n=min(10, len(top_chunks)))
+            return _rerank_with_llm(
+                question, scored_chunks, provider, top_n=min(10, len(top_chunks))
+            )
         return scored_chunks
 
 
@@ -685,55 +697,67 @@ def _extract_evidence_spans(
     Returns list of spans with their positions and relevance indicators.
     """
     spans: List[Dict[str, object]] = []
-    
+
     # Split into sentences
-    sentences = re.split(r'[.!?]\s+', chunk_content)
+    sentences = re.split(r"[.!?]\s+", chunk_content)
     question_lower = question.lower()
     question_words = set(_tokenize(question))
-    
+
     sentence_scores: List[Tuple[float, str, int]] = []
     for idx, sentence in enumerate(sentences):
         if not sentence.strip():
             continue
-        
+
         sentence_lower = sentence.lower()
         sentence_words = set(_tokenize(sentence))
-        
+
         # Score based on word overlap
         if question_words:
             overlap = len(question_words & sentence_words) / len(question_words)
         else:
             overlap = 0.0
-        
+
         # Bonus for exact phrase matches
         if question_lower in sentence_lower:
             overlap += 0.3
-        
+
         # Bonus for key terms
-        key_terms = ['tank', 'skill', 'damage', 'hp', 'speed', 'artifact', 'garage', 'map', 'outpost']
+        key_terms = [
+            "tank",
+            "skill",
+            "damage",
+            "hp",
+            "speed",
+            "artifact",
+            "garage",
+            "map",
+            "outpost",
+        ]
         for term in key_terms:
             if term in sentence_lower:
                 overlap += 0.1
-        
+
         sentence_scores.append((overlap, sentence, idx))
-    
+
     # Sort by score and take top spans
     sentence_scores.sort(key=lambda x: x[0], reverse=True)
-    
+
     for score, sentence, idx in sentence_scores[:max_spans]:
         if score > 0.1:  # Only include relevant spans
             # Find position in original content
             start_pos = chunk_content.find(sentence)
             end_pos = start_pos + len(sentence) if start_pos >= 0 else -1
-            
-            spans.append({
-                "text": sentence.strip(),
-                "score": float(score),
-                "start_pos": start_pos if start_pos >= 0 else 0,
-                "end_pos": end_pos if end_pos >= 0 else len(sentence),
-                "sentence_index": idx,
-            })
-    
+
+            spans.append(
+                {
+                    "text": sentence.strip(),
+                    "score": float(score),
+                    "start_pos": start_pos if start_pos >= 0 else 0,
+                    "end_pos": end_pos if end_pos >= 0 else len(sentence),
+                    "sentence_index": idx,
+                }
+            )
+
     return spans
 
 
@@ -746,30 +770,30 @@ def _filter_chunks_by_evidence(
     """
     Filter chunks that have at least one relevant evidence span.
     Chunks without sufficient evidence are demoted or removed.
-    
+
     Args:
         question: The question being asked
         scored_chunks: List of (score, ChunkRecord) tuples
         min_evidence_score: Minimum evidence score to keep a chunk (0-1)
         keep_top_n: Always keep this many top chunks regardless of evidence
-    
+
     Returns:
         Filtered list of (score, ChunkRecord) tuples
     """
     if not scored_chunks:
         return scored_chunks
-    
+
     filtered: List[Tuple[float, ChunkRecord]] = []
-    
+
     for idx, (score, record) in enumerate(scored_chunks):
         # Always keep top N chunks
         if idx < keep_top_n:
             filtered.append((score, record))
             continue
-        
+
         # Check if chunk has relevant evidence
         evidence_spans = _extract_evidence_spans(question, record.content, max_spans=3)
-        
+
         if evidence_spans:
             # Check if any span meets the minimum score
             max_evidence_score = max(span["score"] for span in evidence_spans)
@@ -779,7 +803,7 @@ def _filter_chunks_by_evidence(
             elif max_evidence_score >= min_evidence_score * 0.5:
                 # Reduce score by 50% for weak evidence
                 filtered.append((score * 0.5, record))
-    
+
     # Sort by (potentially adjusted) scores
     filtered.sort(key=lambda item: item[0], reverse=True)
     return filtered
@@ -815,6 +839,7 @@ def _select_top_chunks(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def get_top_chunks(
     doc_ids: Sequence[str],
     question: str,
@@ -844,41 +869,53 @@ def get_top_chunks(
     except Exception:
         # Embedding failed - will use text-based scoring
         pass
-    
-    vectors = _load_chunk_vectors(unique_ids, normalize=True)  # Pre-normalize vectors (optimization #4)
-    scored = _score_chunks(question_embedding, all_chunks, vectors, provider, question_text=question, use_rrf=use_rrf)
-    
+
+    vectors = _load_chunk_vectors(
+        unique_ids, normalize=True
+    )  # Pre-normalize vectors (optimization #4)
+    scored = _score_chunks(
+        question_embedding, all_chunks, vectors, provider, question_text=question, use_rrf=use_rrf
+    )
+
     # Apply evidence filtering (after RRF fusion, before re-ranking)
     if filter_by_evidence:
-        scored = _filter_chunks_by_evidence(question, scored, min_evidence_score=0.15, keep_top_n=10)
-    
+        scored = _filter_chunks_by_evidence(
+            question, scored, min_evidence_score=0.15, keep_top_n=10
+        )
+
     # Re-rank with cross-encoder (take top 50 for re-ranking, with LLM fallback)
-    reranked = _rerank_with_cross_encoder(question, scored, provider=provider, top_n=min(12, len(scored)))
-    
+    reranked = _rerank_with_cross_encoder(
+        question, scored, provider=provider, top_n=min(12, len(scored))
+    )
+
     selected = _select_top_chunks(
         reranked,
         top_k=top_k,
         per_doc_limit=per_doc_limit or (2 if len(unique_ids) > 1 else None),
     )
-    
+
     # Add evidence spans to results
     results = []
     for score, record in selected:
         evidence_spans = _extract_evidence_spans(question, record.content, max_spans=3)
-        results.append({
-            "doc_id": record.doc_id,
-            "chunk_id": record.chunk_id,
-            "content": record.content,
-            "score": score,
-            "evidence_spans": evidence_spans,
-        })
-    
+        results.append(
+            {
+                "doc_id": record.doc_id,
+                "chunk_id": record.chunk_id,
+                "content": record.content,
+                "score": score,
+                "evidence_spans": evidence_spans,
+            }
+        )
+
     return results
 
 
 def _contains_vietnamese(text: str) -> bool:
     """Check if text contains Vietnamese characters."""
-    vietnamese_chars = re.compile(r'[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]', re.IGNORECASE)
+    vietnamese_chars = re.compile(
+        r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]", re.IGNORECASE
+    )
     return bool(vietnamese_chars.search(text))
 
 
@@ -886,18 +923,20 @@ def _try_translate_chunk(provider, content: str, max_length: int = 500) -> str:
     """Try to translate Vietnamese content to English using LLM."""
     if not _contains_vietnamese(content):
         return content  # No Vietnamese, return as-is
-    
+
     try:
         # Truncate if too long
-        content_to_translate = content[:max_length] + "..." if len(content) > max_length else content
-        
+        content_to_translate = (
+            content[:max_length] + "..." if len(content) > max_length else content
+        )
+
         translation_prompt = (
             f"Translate the following Vietnamese text to English. "
             f"Keep the structure and formatting. If there's English text, keep it as-is.\n\n"
             f"Text to translate:\n{content_to_translate}\n\n"
             f"English translation:"
         )
-        
+
         translated = provider.llm(prompt=translation_prompt)
         return translated.strip()
     except Exception:
@@ -960,23 +999,33 @@ def ask_with_chunks(
     except Exception:
         # Embedding failed - will use text-based scoring
         pass
-    
-    vectors = _load_chunk_vectors([doc_id], normalize=True)  # Pre-normalize vectors (optimization #4)
-    scored = _score_chunks(question_embedding, chunks, vectors, provider, question_text=question, use_rrf=use_rrf)
-    
+
+    vectors = _load_chunk_vectors(
+        [doc_id], normalize=True
+    )  # Pre-normalize vectors (optimization #4)
+    scored = _score_chunks(
+        question_embedding, chunks, vectors, provider, question_text=question, use_rrf=use_rrf
+    )
+
     # Apply evidence filtering
     if filter_by_evidence:
-        scored = _filter_chunks_by_evidence(question, scored, min_evidence_score=0.15, keep_top_n=10)
-    
+        scored = _filter_chunks_by_evidence(
+            question, scored, min_evidence_score=0.15, keep_top_n=10
+        )
+
     # Re-rank with cross-encoder (take top 50 for re-ranking)
-    reranked = _rerank_with_cross_encoder(question, scored, provider=provider, top_n=min(12, len(scored)))
+    reranked = _rerank_with_cross_encoder(
+        question, scored, provider=provider, top_n=min(12, len(scored))
+    )
     top_records = [record for _, record in reranked[:top_k]]
-    prompt = _build_prompt(metadata.get("file_path", doc_id), [r.content for r in top_records], question)
-    
+    prompt = _build_prompt(
+        metadata.get("file_path", doc_id), [r.content for r in top_records], question
+    )
+
     try:
         answer_text = provider.llm(prompt=prompt)
         answer = answer_text.strip()
-        
+
         # Ensure answer has both English and Vietnamese sections
         if "**English:**" not in answer and "**Vietnamese" not in answer:
             # If LLM didn't follow format, wrap the answer
@@ -988,13 +1037,15 @@ def ask_with_chunks(
     context_payload = []
     for score, record in reranked[:top_k]:
         evidence_spans = _extract_evidence_spans(question, record.content, max_spans=3)
-        context_payload.append({
-            "chunk_id": record.chunk_id,
-            "doc_id": record.doc_id,
-            "content": record.content,
-            "score": score,
-            "evidence_spans": evidence_spans,
-        })
+        context_payload.append(
+            {
+                "chunk_id": record.chunk_id,
+                "doc_id": record.doc_id,
+                "content": record.content,
+                "score": score,
+                "evidence_spans": evidence_spans,
+            }
+        )
 
     return {
         "answer": answer,
@@ -1032,20 +1083,28 @@ def ask_across_docs(
         question_embedding = _embed_texts(provider, [question], use_cache=True)[0]
         # Normalize question embedding for faster cosine similarity (optimization #4)
         question_embedding = _normalize_vector(question_embedding)
-    except Exception as e:
+    except Exception:
         # Embedding failed - will use text-based scoring
         pass
-    
-    vectors = _load_chunk_vectors(unique_ids, normalize=True)  # Pre-normalize vectors (optimization #4)
-    scored = _score_chunks(question_embedding, all_chunks, vectors, provider, question_text=question, use_rrf=use_rrf)
-    
+
+    vectors = _load_chunk_vectors(
+        unique_ids, normalize=True
+    )  # Pre-normalize vectors (optimization #4)
+    scored = _score_chunks(
+        question_embedding, all_chunks, vectors, provider, question_text=question, use_rrf=use_rrf
+    )
+
     # Apply evidence filtering (after RRF fusion, before re-ranking)
     if filter_by_evidence:
-        scored = _filter_chunks_by_evidence(question, scored, min_evidence_score=0.15, keep_top_n=10)
-    
+        scored = _filter_chunks_by_evidence(
+            question, scored, min_evidence_score=0.15, keep_top_n=10
+        )
+
     # Re-rank with cross-encoder (take top 50 for re-ranking, with LLM fallback)
-    reranked = _rerank_with_cross_encoder(question, scored, provider=provider, top_n=min(12, len(scored)))
-    
+    reranked = _rerank_with_cross_encoder(
+        question, scored, provider=provider, top_n=min(12, len(scored))
+    )
+
     selected = _select_top_chunks(
         reranked,
         top_k=top_k,
@@ -1053,28 +1112,29 @@ def ask_across_docs(
     )
 
     prompt_docs = ", ".join(
-        metadata_map.get(doc_id, {}).get("file_path", doc_id) or doc_id
-        for doc_id in unique_ids
+        metadata_map.get(doc_id, {}).get("file_path", doc_id) or doc_id for doc_id in unique_ids
     )
     prompt = _build_prompt(prompt_docs, [record.content for _, record in selected], question)
-    
+
     # Add evidence spans to context payload
     context_payload = []
     for score, record in selected:
         evidence_spans = _extract_evidence_spans(question, record.content, max_spans=3)
-        context_payload.append({
-            "doc_id": record.doc_id,
-            "chunk_id": record.chunk_id,
-            "content": record.content,
-            "score": score,
-            "evidence_spans": evidence_spans,
-        })
-    
+        context_payload.append(
+            {
+                "doc_id": record.doc_id,
+                "chunk_id": record.chunk_id,
+                "content": record.content,
+                "score": score,
+                "evidence_spans": evidence_spans,
+            }
+        )
+
     # Try to get LLM answer, but provide chunks as fallback
     try:
         answer_text = provider.llm(prompt=prompt)
         answer = answer_text.strip()
-        
+
         # Ensure answer has both English and Vietnamese sections
         if "**English:**" not in answer and "**Vietnamese" not in answer:
             # If LLM didn't follow format, wrap the answer
@@ -1083,18 +1143,18 @@ def ask_across_docs(
         # Log the actual error for debugging
         error_type = type(e).__name__
         error_details = str(e)
-        
+
         # Check if it's an API key issue
         is_api_key_error = (
-            "401" in error_details or 
-            "API key" in error_details.lower() or 
-            "authentication" in error_details.lower() or
-            "invalid_api_key" in error_details.lower() or
-            "api_key" in error_type.lower()
+            "401" in error_details
+            or "API key" in error_details.lower()
+            or "authentication" in error_details.lower()
+            or "invalid_api_key" in error_details.lower()
+            or "api_key" in error_type.lower()
         )
         # If LLM fails, create a summary from chunks
         error_msg = str(e)
-        
+
         # Provide helpful error message about API key
         api_key_note = ""
         if is_api_key_error:
@@ -1110,7 +1170,7 @@ def ask_across_docs(
                 "- DASHSCOPE_API_KEY=your_key_here\n"
                 "- HOẶC QWEN_API_KEY=your_key_here\n"
             )
-        
+
         if selected:
             # Filter out chunks that are just analysis metadata
             useful_chunks = []
@@ -1118,27 +1178,39 @@ def ask_across_docs(
                 content = record.content.strip()
                 # Skip chunks that are primarily analysis metadata
                 is_analysis = (
-                    content.startswith("Table Analysis:") or 
-                    content.startswith("Image Content Analysis:") or
-                    content.startswith("Image Path:") or
-                    ("Image Path:" in content and len(content.split("\n")) < 5) or
-                    (content.count("Image Path:") > 0 and len([line for line in content.split("\n") if line.strip() and not line.startswith("Image") and not line.startswith("Caption")]) < 3)
+                    content.startswith("Table Analysis:")
+                    or content.startswith("Image Content Analysis:")
+                    or content.startswith("Image Path:")
+                    or ("Image Path:" in content and len(content.split("\n")) < 5)
+                    or (
+                        content.count("Image Path:") > 0
+                        and len(
+                            [
+                                line
+                                for line in content.split("\n")
+                                if line.strip()
+                                and not line.startswith("Image")
+                                and not line.startswith("Caption")
+                            ]
+                        )
+                        < 3
+                    )
                 )
-                
+
                 # Prefer actual text content
                 if not is_analysis and len(content) > 50:
                     useful_chunks.append((score, record))
                 elif not is_analysis and len(content) > 30:  # Keep short but real text
                     useful_chunks.append((score, record))
-            
+
             # If no useful chunks found, use all chunks but mark them
             if not useful_chunks:
                 useful_chunks = selected[:5]
-            
+
             if useful_chunks:
                 chunk_summaries = []
                 chunk_summaries_en = []  # English translations
-                
+
                 for score, record in useful_chunks[:5]:  # Top 5 useful chunks
                     content = record.content.strip()
                     # Show more content for text chunks
@@ -1146,20 +1218,24 @@ def ask_across_docs(
                         content_preview = content[:300] + "..."
                     else:
                         content_preview = content
-                    
-                    doc_name = Path(record.doc_id).name if '/' in record.doc_id else record.doc_id
+
+                    doc_name = Path(record.doc_id).name if "/" in record.doc_id else record.doc_id
                     chunk_summaries.append(f"**From {doc_name}:**\n{content_preview}")
-                    
+
                     # Try to translate for English section if contains Vietnamese
                     if _contains_vietnamese(content_preview) and not is_api_key_error:
                         try:
-                            translated = _try_translate_chunk(provider, content_preview, max_length=300)
+                            translated = _try_translate_chunk(
+                                provider, content_preview, max_length=300
+                            )
                             chunk_summaries_en.append(f"**From {doc_name}:**\n{translated}")
                         except Exception:
-                            chunk_summaries_en.append(f"**From {doc_name}:**\n{content_preview}\n\n*[Vietnamese content - translation requires valid API key]*")
+                            chunk_summaries_en.append(
+                                f"**From {doc_name}:**\n{content_preview}\n\n*[Vietnamese content - translation requires valid API key]*"
+                            )
                     else:
                         chunk_summaries_en.append(f"**From {doc_name}:**\n{content_preview}")
-                
+
                 # Format in bilingual structure
                 # Use translated versions for English section if available
                 english_chunks = chunk_summaries_en if chunk_summaries_en else chunk_summaries
@@ -1170,21 +1246,23 @@ def ask_across_docs(
                 )
                 if len(useful_chunks) > 5:
                     english_section += f"\n\n... and {len(useful_chunks) - 5} more relevant chunks."
-                
+
                 if is_api_key_error:
                     english_section += (
                         "\n\n*Note: The content above may contain Vietnamese text. "
                         "To get English translations and AI-generated summaries, please configure your API key in .env file.*"
                     )
-                
+
                 vietnamese_section = (
                     f"**Vietnamese (Tiếng Việt):**\n\n"
                     f"**Đã tìm thấy {len(useful_chunks)} đoạn thông tin liên quan:**\n\n"
                     + "\n\n".join(chunk_summaries)
                 )
                 if len(useful_chunks) > 5:
-                    vietnamese_section += f"\n\n... và {len(useful_chunks) - 5} đoạn thông tin liên quan khác."
-                
+                    vietnamese_section += (
+                        f"\n\n... và {len(useful_chunks) - 5} đoạn thông tin liên quan khác."
+                    )
+
                 answer = english_section + "\n\n" + vietnamese_section
                 if api_key_note:
                     answer += "\n\n" + api_key_note
@@ -1192,9 +1270,15 @@ def ask_across_docs(
                 # Fallback: show any chunks we have
                 chunk_summaries = []
                 for score, record in selected[:3]:
-                    content_preview = record.content[:200] + "..." if len(record.content) > 200 else record.content
-                    chunk_summaries.append(f"**From {Path(record.doc_id).name if '/' in record.doc_id else record.doc_id}:**\n{content_preview}")
-                
+                    content_preview = (
+                        record.content[:200] + "..."
+                        if len(record.content) > 200
+                        else record.content
+                    )
+                    chunk_summaries.append(
+                        f"**From {Path(record.doc_id).name if '/' in record.doc_id else record.doc_id}:**\n{content_preview}"
+                    )
+
                 english_section = (
                     f"**English:**\n\n"
                     f"**Retrieved {len(selected)} chunks:**\n\n"
@@ -1210,22 +1294,21 @@ def ask_across_docs(
                 answer = english_section + "\n\n" + vietnamese_section
                 if api_key_note:
                     answer += "\n\n" + api_key_note
-            
+
             answer += (
-                f"\n\n*Note: LLM generation unavailable. Showing retrieved chunks. "
-                f"To get AI-generated summaries with English translations, please configure your API key in .env file.*\n"
+                "\n\n*Note: LLM generation unavailable. Showing retrieved chunks. "
+                "To get AI-generated summaries with English translations, please configure your API key in .env file.*\n"
             )
             answer += (
-                f"*Lưu ý: Không thể tạo tóm tắt bằng AI. Đang hiển thị các đoạn thông tin đã tìm thấy. "
-                f"Để có tóm tắt tự động với bản dịch tiếng Anh, vui lòng cấu hình API key trong file .env.*"
+                "*Lưu ý: Không thể tạo tóm tắt bằng AI. Đang hiển thị các đoạn thông tin đã tìm thấy. "
+                "Để có tóm tắt tự động với bản dịch tiếng Anh, vui lòng cấu hình API key trong file .env.*"
             )
         else:
             answer = f"**English:**\n\nError: Could not retrieve relevant chunks. {error_msg}\n\n"
             answer += f"**Vietnamese (Tiếng Việt):**\n\nLỗi: Không thể tìm thấy các đoạn thông tin liên quan. {error_msg}"
-    
+
     return {
         "answer": answer,
         "doc_ids": unique_ids,
         "context": context_payload,
     }
-

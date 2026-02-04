@@ -116,6 +116,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const maxW = Math.min(1200, Math.floor(window.innerWidth * DOC_VIEWER_MAX_WIDTH_RATIO));
             let lastClientX = startX;
             let rafId = null;
+            let cleaned = false;
 
             function applyWidth() {
                 rafId = null;
@@ -132,17 +133,31 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (rafId == null) rafId = requestAnimationFrame(applyWidth);
             }
 
-            function onUp(ev) {
-                if (ev.pointerId !== pointerId) return;
-                ev.preventDefault();
+            function cleanup(ev) {
+                if (ev && ev.pointerId !== pointerId) return;
+                if (cleaned) return;
+                cleaned = true;
                 if (rafId != null) cancelAnimationFrame(rafId);
                 documentViewerResizeHandle.removeEventListener('pointermove', onMove);
                 documentViewerResizeHandle.removeEventListener('pointerup', onUp);
                 documentViewerResizeHandle.removeEventListener('pointercancel', onUp);
-                documentViewerResizeHandle.releasePointerCapture(pointerId);
+                document.removeEventListener('pointerup', onDocUp, true);
+                document.removeEventListener('pointercancel', onDocUp, true);
+                try { documentViewerResizeHandle.releasePointerCapture(pointerId); } catch (_) {}
                 documentViewerSidebar.style.transition = '';
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
+            }
+
+            function onUp(ev) {
+                if (ev.pointerId !== pointerId) return;
+                ev.preventDefault();
+                cleanup(ev);
+            }
+
+            function onDocUp(ev) {
+                if (ev.pointerId !== pointerId) return;
+                cleanup(ev);
             }
 
             document.body.style.cursor = 'col-resize';
@@ -151,6 +166,8 @@ document.addEventListener('DOMContentLoaded', function() {
             documentViewerResizeHandle.addEventListener('pointermove', onMove);
             documentViewerResizeHandle.addEventListener('pointerup', onUp);
             documentViewerResizeHandle.addEventListener('pointercancel', onUp);
+            document.addEventListener('pointerup', onDocUp, true);
+            document.addEventListener('pointercancel', onDocUp, true);
         });
     }
 

@@ -3,11 +3,10 @@ GDD RAG Service
 Extracted from gradio_app.py - handles GDD document queries
 """
 
-import os
-import sys
 import shutil
+import sys
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 from werkzeug.utils import secure_filename
 
@@ -19,11 +18,10 @@ if str(PROJECT_ROOT) not in sys.path:
 # Try to import Supabase storage (optional)
 try:
     from backend.storage.gdd_supabase_storage import (
+        USE_SUPABASE,
         get_gdd_top_chunks_supabase,
-        list_gdd_documents_supabase,
-        index_gdd_chunks_to_supabase,
-        USE_SUPABASE
     )
+
     SUPABASE_AVAILABLE = USE_SUPABASE
 except ImportError:
     SUPABASE_AVAILABLE = False
@@ -32,10 +30,12 @@ except ImportError:
 # Import gdd_rag_backbone (now included in unified_rag_app)
 try:
     from gdd_rag_backbone.config import DEFAULT_DOCS_DIR, DEFAULT_WORKING_DIR
+
     GDD_RAG_BACKBONE_AVAILABLE = True
 except ImportError as e:
     import sys
     import traceback
+
     print(f"[ERROR] Failed to import gdd_rag_backbone: {e}", file=sys.stderr)
     traceback.print_exc(file=sys.stderr)
     GDD_RAG_BACKBONE_AVAILABLE = False
@@ -90,15 +90,21 @@ def list_documents_from_markdown() -> List[Dict[str, Any]]:
         client = get_supabase_client()
         chunk_counts = {}
         if keyword_docs:
-            doc_ids = [doc['doc_id']
-                       for doc in keyword_docs if 'doc_id' in doc]
+            doc_ids = [doc["doc_id"]
+                       for doc in keyword_docs if "doc_id" in doc]
             for doc_id in doc_ids:
                 try:
-                    chunks_result = client.table('keyword_chunks').select(
-                        'id', count='exact').eq('doc_id', doc_id).execute()
-                    chunk_counts[doc_id] = chunks_result.count if hasattr(
-                        chunks_result, 'count') else 0
-                except:
+                    chunks_result = (
+                        client.table("keyword_chunks")
+                        .select("id", count="exact")
+                        .eq("doc_id", doc_id)
+                        .execute()
+                    )
+                    chunk_counts[doc_id] = (
+                        chunks_result.count if hasattr(
+                            chunks_result, "count") else 0
+                    )
+                except Exception:
                     chunk_counts[doc_id] = 0
 
         for doc in keyword_docs:
@@ -109,20 +115,24 @@ def list_documents_from_markdown() -> List[Dict[str, Any]]:
             name = doc.get("name", doc_id)
             file_path = doc.get("file_path")  # May be None, that's OK
 
-            documents.append({
-                'doc_id': doc_id,
-                'name': name,
-                'file_path': file_path,  # May be None - stored for reference only
-                'chunks_count': chunks_count,
-                'status': 'ready' if chunks_count > 0 else 'indexed'
-            })
+            documents.append(
+                {
+                    "doc_id": doc_id,
+                    "name": name,
+                    "file_path": file_path,  # May be None - stored for reference only
+                    "chunks_count": chunks_count,
+                    "status": "ready" if chunks_count > 0 else "indexed",
+                }
+            )
 
         return documents
     except Exception as e:
         import logging
+
         logger = logging.getLogger(__name__)
         logger.error(f"Warning: Could not load documents from Supabase: {e}")
         import traceback
+
         logger.error(traceback.format_exc())
         return []
 
@@ -144,8 +154,13 @@ def extract_full_document(doc_id: str) -> str:
         return f"Error: Supabase is not available. Cannot extract document '{doc_id}'."
 
     try:
-        from backend.storage.supabase_client import get_gdd_document_markdown, get_gdd_document_pdf_url, get_supabase_client
         import logging
+
+        from backend.storage.supabase_client import (
+            get_gdd_document_pdf_url,
+            get_supabase_client,
+        )
+
         logger = logging.getLogger(__name__)
 
         # PRIORITY 1: Check if PDF exists in Supabase Storage - if yes, return PDF embed
@@ -161,13 +176,18 @@ def extract_full_document(doc_id: str) -> str:
         # PRIORITY 2: Try to get full_text from keyword_documents table (if stored)
         try:
             client = get_supabase_client()
-            doc_result = client.table('keyword_documents').select(
-                'full_text, file_path').eq('doc_id', doc_id).limit(1).execute()
+            doc_result = (
+                client.table("keyword_documents")
+                .select("full_text, file_path")
+                .eq("doc_id", doc_id)
+                .limit(1)
+                .execute()
+            )
 
             if doc_result.data:
                 doc = doc_result.data[0]
-                full_text = doc.get('full_text')
-                file_path = doc.get('file_path', '')
+                full_text = doc.get("full_text")
+                doc.get("file_path", "")
 
                 if full_text:
                     logger.info(
@@ -181,14 +201,24 @@ def extract_full_document(doc_id: str) -> str:
             client = get_supabase_client()
 
             # First check if document exists
-            doc_result = client.table('keyword_documents').select(
-                'doc_id, file_path').eq('doc_id', doc_id).limit(1).execute()
+            doc_result = (
+                client.table("keyword_documents")
+                .select("doc_id, file_path")
+                .eq("doc_id", doc_id)
+                .limit(1)
+                .execute()
+            )
             if not doc_result.data:
                 return f"Error: Document '{doc_id}' not found in Supabase."
 
             # Get all chunks for this document, ordered by chunk_index
-            result = client.table('keyword_chunks').select('content, chunk_id, section_heading, chunk_index').eq(
-                'doc_id', doc_id).order('chunk_index').execute()
+            result = (
+                client.table("keyword_chunks")
+                .select("content, chunk_id, section_heading, chunk_index")
+                .eq("doc_id", doc_id)
+                .order("chunk_index")
+                .execute()
+            )
 
             if not result.data:
                 return f"Error: Document '{doc_id}' exists in Supabase but has no chunks. Please re-index the document."
@@ -198,8 +228,8 @@ def extract_full_document(doc_id: str) -> str:
             sections = {}
             for chunk in result.data:
                 section_heading = chunk.get(
-                    'section_heading') or '(No section)'
-                content = chunk.get('content', '')
+                    "section_heading") or "(No section)"
+                content = chunk.get("content", "")
 
                 if section_heading not in sections:
                     sections[section_heading] = []
@@ -208,12 +238,12 @@ def extract_full_document(doc_id: str) -> str:
             # Build document
             doc_parts = []
             for section_heading, contents in sorted(sections.items()):
-                if section_heading and section_heading != '(No section)':
+                if section_heading and section_heading != "(No section)":
                     doc_parts.append(f"## {section_heading}\n")
-                doc_parts.append('\n\n'.join(contents))
-                doc_parts.append('\n\n')
+                doc_parts.append("\n\n".join(contents))
+                doc_parts.append("\n\n")
 
-            reconstructed = ''.join(doc_parts).strip()
+            reconstructed = "".join(doc_parts).strip()
 
             if reconstructed:
                 logger.info(
@@ -225,15 +255,18 @@ def extract_full_document(doc_id: str) -> str:
         except Exception as e:
             logger.error(f"Error reconstructing document from chunks: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
             return f"Error: Document '{doc_id}' not found in Supabase or has no markdown content stored. Reconstruction from chunks also failed: {str(e)}"
 
     except Exception as e:
         import logging
+
         logger = logging.getLogger(__name__)
         logger.error(
             f"Error reading document '{doc_id}' from Supabase: {str(e)}")
         import traceback
+
         logger.error(traceback.format_exc())
         return f"Error reading document '{doc_id}' from Supabase: {str(e)}"
 
@@ -251,13 +284,35 @@ def _detect_question_language(text: str) -> str:
     text_lower = text.lower()
 
     # Vietnamese characters (accented letters)
-    vietnamese_chars = 'àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ'
+    vietnamese_chars = "àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ"
 
     # Common Vietnamese words
     vietnamese_words = [
-        'là', 'của', 'và', 'với', 'trong', 'cho', 'được', 'có', 'không', 'một',
-        'các', 'này', 'đó', 'như', 'theo', 'từ', 'về', 'đến', 'nếu', 'khi',
-        'thiết kế', 'mục đích', 'tương tác', 'thành phần', 'chức năng'
+        "là",
+        "của",
+        "và",
+        "với",
+        "trong",
+        "cho",
+        "được",
+        "có",
+        "không",
+        "một",
+        "các",
+        "này",
+        "đó",
+        "như",
+        "theo",
+        "từ",
+        "về",
+        "đến",
+        "nếu",
+        "khi",
+        "thiết kế",
+        "mục đích",
+        "tương tác",
+        "thành phần",
+        "chức năng",
     ]
 
     # Check for Vietnamese characters
@@ -275,10 +330,10 @@ def _detect_question_language(text: str) -> str:
 
     # If there are clear Vietnamese indicators, return Vietnamese
     if vietnamese_score >= 2:
-        return 'vietnamese'
+        return "vietnamese"
 
     # Default to English
-    return 'english'
+    return "english"
 
 
 def _select_chunks_for_answer(chunks):
@@ -370,6 +425,7 @@ def list_documents():
         list: List of document metadata dictionaries
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     logger.info("=" * 60)
@@ -385,6 +441,7 @@ def list_documents():
         return documents
     except Exception as e:
         import traceback
+
         logger.error(f"❌ Error listing documents: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         logger.info("=" * 60)
@@ -457,19 +514,24 @@ def get_document_sections(doc_id: str) -> List[Dict[str, str]]:
         return []
 
     import logging
+
     logger = logging.getLogger(__name__)
 
     try:
         from backend.storage.supabase_client import get_supabase_client
+
         client = get_supabase_client()
 
         logger.info(
             f"[get_document_sections] Querying chunks for doc_id: {doc_id}")
 
         # Get all unique sections for this document from keyword_chunks
-        result = client.table('keyword_chunks').select(
-            'section_heading, chunk_index'
-        ).eq('doc_id', doc_id).execute()
+        result = (
+            client.table("keyword_chunks")
+            .select("section_heading, chunk_index")
+            .eq("doc_id", doc_id)
+            .execute()
+        )
 
         raw_chunks = result.data or []
         logger.info(
@@ -480,17 +542,18 @@ def get_document_sections(doc_id: str) -> List[Dict[str, str]]:
             logger.warning(
                 f"[get_document_sections] No chunks found for exact doc_id: {doc_id}")
             logger.info(
-                f"[get_document_sections] Attempting to find similar doc_ids...")
+                "[get_document_sections] Attempting to find similar doc_ids...")
 
             # Get all unique doc_ids from chunks
             all_doc_ids_result = client.table(
-                'keyword_chunks').select('doc_id').execute()
+                "keyword_chunks").select("doc_id").execute()
             all_doc_ids = set()
-            for row in (all_doc_ids_result.data or []):
-                all_doc_ids.add(row.get('doc_id'))
+            for row in all_doc_ids_result.data or []:
+                all_doc_ids.add(row.get("doc_id"))
 
             logger.info(
-                f"[get_document_sections] Found {len(all_doc_ids)} unique doc_ids in database")
+                f"[get_document_sections] Found {len(all_doc_ids)} unique doc_ids in database"
+            )
 
             # Try case-insensitive match
             all_doc_ids_lower = {d.lower(): d for d in all_doc_ids}
@@ -499,21 +562,33 @@ def get_document_sections(doc_id: str) -> List[Dict[str, str]]:
             if doc_id_lower in all_doc_ids_lower:
                 actual_doc_id = all_doc_ids_lower[doc_id_lower]
                 logger.info(
-                    f"[get_document_sections] Found case-insensitive match: {actual_doc_id}")
+                    f"[get_document_sections] Found case-insensitive match: {actual_doc_id}"
+                )
                 # Retry with actual doc_id
-                result = client.table('keyword_chunks').select(
-                    'section_heading, chunk_index'
-                ).eq('doc_id', actual_doc_id).execute()
+                result = (
+                    client.table("keyword_chunks")
+                    .select("section_heading, chunk_index")
+                    .eq("doc_id", actual_doc_id)
+                    .execute()
+                )
                 raw_chunks = result.data or []
                 logger.info(
-                    f"[get_document_sections] Found {len(raw_chunks)} chunks with corrected doc_id")
+                    f"[get_document_sections] Found {len(raw_chunks)} chunks with corrected doc_id"
+                )
             else:
                 # Try fuzzy matching
                 def normalize_for_match(text):
                     """Normalize text for fuzzy matching."""
                     if not text:
                         return ""
-                    return text.lower().replace('_', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
+                    return (
+                        text.lower()
+                        .replace("_", "")
+                        .replace("-", "")
+                        .replace(" ", "")
+                        .replace("(", "")
+                        .replace(")", "")
+                    )
 
                 doc_id_normalized = normalize_for_match(doc_id)
                 similar_doc_ids = []
@@ -522,31 +597,40 @@ def get_document_sections(doc_id: str) -> List[Dict[str, str]]:
                     existing_normalized = normalize_for_match(existing_doc_id)
                     if doc_id_normalized == existing_normalized:
                         similar_doc_ids.append(existing_doc_id)
-                    elif doc_id_normalized in existing_normalized or existing_normalized in doc_id_normalized:
+                    elif (
+                        doc_id_normalized in existing_normalized
+                        or existing_normalized in doc_id_normalized
+                    ):
                         similar_doc_ids.append(existing_doc_id)
 
                 if similar_doc_ids:
                     logger.info(
-                        f"[get_document_sections] Found {len(similar_doc_ids)} similar doc_ids: {similar_doc_ids[:3]}")
+                        f"[get_document_sections] Found {len(similar_doc_ids)} similar doc_ids: {similar_doc_ids[:3]}"
+                    )
                     # Use the first similar one
                     actual_doc_id = similar_doc_ids[0]
                     logger.info(
                         f"[get_document_sections] Using similar doc_id: {actual_doc_id}")
-                    result = client.table('keyword_chunks').select(
-                        'section_heading, chunk_index'
-                    ).eq('doc_id', actual_doc_id).execute()
+                    result = (
+                        client.table("keyword_chunks")
+                        .select("section_heading, chunk_index")
+                        .eq("doc_id", actual_doc_id)
+                        .execute()
+                    )
                     raw_chunks = result.data or []
                     logger.info(
-                        f"[get_document_sections] Found {len(raw_chunks)} chunks with similar doc_id")
+                        f"[get_document_sections] Found {len(raw_chunks)} chunks with similar doc_id"
+                    )
                 else:
                     logger.warning(
-                        f"[get_document_sections] No similar doc_ids found. Available doc_ids (sample): {list(all_doc_ids)[:5]}")
+                        f"[get_document_sections] No similar doc_ids found. Available doc_ids (sample): {list(all_doc_ids)[:5]}"
+                    )
 
         sections_map = {}
 
         for row in raw_chunks:
-            section_heading = row.get('section_heading') or ''
-            chunk_index = row.get('chunk_index', 999)
+            section_heading = row.get("section_heading") or ""
+            chunk_index = row.get("chunk_index", 999)
 
             # Use section_heading as key, or create default if empty
             key = section_heading if section_heading else "(No section)"
@@ -554,37 +638,41 @@ def get_document_sections(doc_id: str) -> List[Dict[str, str]]:
             # If no section info at all, create a default section entry
             if not section_heading:
                 logger.debug(
-                    f"[get_document_sections] Chunk has no section info, using default section")
+                    "[get_document_sections] Chunk has no section info, using default section"
+                )
 
             # Store section with best available info
             if key not in sections_map:
                 sections_map[key] = {
-                    'section_name': section_heading if section_heading else "(No section)",
+                    "section_name": section_heading if section_heading else "(No section)",
                     # Use section_heading as section_path for compatibility
-                    'section_path': section_heading,
+                    "section_path": section_heading,
                     # Use section_heading as numbered_header for compatibility
-                    'numbered_header': section_heading,
-                    'section_index': chunk_index
+                    "numbered_header": section_heading,
+                    "section_index": chunk_index,
                 }
             else:
                 # Update if we have a lower chunk_index (earlier in document)
                 existing = sections_map[key]
-                if chunk_index < existing['section_index']:
-                    existing['section_index'] = chunk_index
+                if chunk_index < existing["section_index"]:
+                    existing["section_index"] = chunk_index
 
         # Convert to list and sort by section_index
         sections = list(sections_map.values())
-        sections.sort(key=lambda x: (x['section_index'], x['section_name']))
+        sections.sort(key=lambda x: (x["section_index"], x["section_name"]))
 
         logger.info(
-            f"[get_document_sections] Returning {len(sections)} unique sections for doc_id: {doc_id}")
+            f"[get_document_sections] Returning {len(sections)} unique sections for doc_id: {doc_id}"
+        )
 
         return sections
     except Exception as e:
         import logging
+
         logger = logging.getLogger(__name__)
         logger.error(f"Error getting sections for document {doc_id}: {e}")
         import traceback
+
         logger.error(traceback.format_exc())
         return []
 
@@ -604,24 +692,22 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
     """
     try:
         if not query.strip():
-            return {
-                'response': 'Please provide a query.',
-                'status': 'error'
-            }
+            return {"response": "Please provide a query.", "status": "error"}
 
         # Get documents from markdown directory
         markdown_docs = list_documents_from_markdown()
 
         # Get indexed doc IDs (documents with chunks in Supabase)
-        indexed_doc_ids = [doc.get(
-            "doc_id", "") for doc in markdown_docs if doc.get("chunks_count", 0) > 0]
+        indexed_doc_ids = [
+            doc.get("doc_id", "") for doc in markdown_docs if doc.get("chunks_count", 0) > 0
+        ]
 
         # If no indexed documents, return helpful message
         if not indexed_doc_ids:
             total_docs = len(markdown_docs)
             return {
-                'response': f'No indexed markdown documents found in Supabase. Found {total_docs} markdown files, but none are indexed yet. Please index documents in Supabase first.',
-                'status': 'error'
+                "response": f"No indexed markdown documents found in Supabase. Found {total_docs} markdown files, but none are indexed yet. Please index documents in Supabase first.",
+                "status": "error",
             }
 
         # Handle document selection from dropdown
@@ -694,10 +780,12 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
                 display_no_suffix_normalized = normalize_for_match(
                     display_name_no_suffix)
 
-                if (doc_id_normalized in selected_normalized or
-                    selected_normalized in doc_id_normalized or
-                    display_normalized == selected_normalized or
-                        display_no_suffix_normalized == selected_normalized):
+                if (
+                    doc_id_normalized in selected_normalized
+                    or selected_normalized in doc_id_normalized
+                    or display_normalized == selected_normalized
+                    or display_no_suffix_normalized == selected_normalized
+                ):
                     target_doc_id = doc_id
                     break
 
@@ -719,12 +807,16 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
         if is_extract_request and target_doc_id:
             full_content = extract_full_document(target_doc_id)
             return {
-                'response': f"**Full Document: {target_doc_id}**\n\n{full_content}",
-                'status': 'success'
+                "response": f"**Full Document: {target_doc_id}**\n\n{full_content}",
+                "status": "success",
             }
 
         # Handle special queries
-        if "what are the files" in message_lower or "list documents" in message_lower or "show documents" in message_lower:
+        if (
+            "what are the files" in message_lower
+            or "list documents" in message_lower
+            or "show documents" in message_lower
+        ):
             doc_list = []
             for doc in markdown_docs[:20]:  # Limit to 20
                 doc_id = doc["doc_id"]
@@ -733,19 +825,18 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
                 file_name = Path(file_path).name if file_path else doc_id
                 doc_list.append(f"- 📝 {file_name} ({chunks_count} chunks)")
 
-            response = f"**Indexed Markdown Documents ({len(indexed_doc_ids)} total):**\n\n" + "\n".join(
-                doc_list)
+            response = (
+                f"**Indexed Markdown Documents ({len(indexed_doc_ids)} total):**\n\n"
+                + "\n".join(doc_list)
+            )
             if len(indexed_doc_ids) > 20:
                 response += f"\n\n... and {len(indexed_doc_ids) - 20} more documents."
 
-            return {
-                'response': response,
-                'status': 'success'
-            }
+            return {"response": response, "status": "success"}
 
         # If no specific document selected, check if user is asking about a specific document in message
         if not selected_doc or selected_doc == "All Documents":
-            markdown_status = {doc["doc_id"]: doc for doc in markdown_docs}
+            {doc["doc_id"]: doc for doc in markdown_docs}
 
             # First, try to find exact document ID match in message
             # Check ALL documents (not just indexed) to find the target
@@ -772,34 +863,92 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
                 message_normalized = normalize_for_match(message_lower)
 
                 # Strategy 1: Check if doc_id appears in message (exact or partial)
-                if doc_id_normalized in message_normalized or message_normalized in doc_id_normalized:
+                if (
+                    doc_id_normalized in message_normalized
+                    or message_normalized in doc_id_normalized
+                ):
                     target_doc_id = doc_id
                     break
 
                 # Strategy 1b: Check if key words from doc_id appear in message
                 # Extract key words (remove common prefixes like "module", "tank", "war")
                 # Split by removing underscores and common words
-                doc_parts = doc_id_normalized.replace('_', ' ').split()
-                doc_words = [w for w in doc_parts if len(w) > 3 and w not in [
-                    'module', 'tank', 'war', 'system', 'design', 'progression', 'monetization', 'character', 'combat', 'game', 'multiplayer', 'world']]
+                doc_parts = doc_id_normalized.replace("_", " ").split()
+                doc_words = [
+                    w
+                    for w in doc_parts
+                    if len(w) > 3
+                    and w
+                    not in [
+                        "module",
+                        "tank",
+                        "war",
+                        "system",
+                        "design",
+                        "progression",
+                        "monetization",
+                        "character",
+                        "combat",
+                        "game",
+                        "multiplayer",
+                        "world",
+                    ]
+                ]
                 if doc_words:
                     # Check if at least 2 key words match, or if a unique word matches
                     matching_words = sum(
                         1 for word in doc_words if word in message_normalized)
-                    unique_words = [w for w in doc_words if w in ['localization', 'latam', 'tổng', 'quan',
-                                                                  'artifact', 'onboarding', 'chưa', 'xong', 'elo', 'rank', 'leaderboard', 'elemental', 'class']]
-                    if matching_words >= 2 or (unique_words and any(w in message_normalized for w in unique_words)):
+                    unique_words = [
+                        w
+                        for w in doc_words
+                        if w
+                        in [
+                            "localization",
+                            "latam",
+                            "tổng",
+                            "quan",
+                            "artifact",
+                            "onboarding",
+                            "chưa",
+                            "xong",
+                            "elo",
+                            "rank",
+                            "leaderboard",
+                            "elemental",
+                            "class",
+                        ]
+                    ]
+                    if matching_words >= 2 or (
+                        unique_words and any(
+                            w in message_normalized for w in unique_words)
+                    ):
                         target_doc_id = doc_id
                         break
 
                 # Strategy 1c: Check if message contains partial doc_id (e.g., "localization_latam" matches full doc_id)
                 # Remove common prefixes and check if remaining parts match
                 message_clean = message_normalized
-                for prefix in ['progression', 'module', 'tank', 'war', 'monetization', 'character', 'combat']:
-                    message_clean = message_clean.replace(prefix, '')
+                for prefix in [
+                    "progression",
+                    "module",
+                    "tank",
+                    "war",
+                    "monetization",
+                    "character",
+                    "combat",
+                ]:
+                    message_clean = message_clean.replace(prefix, "")
                 doc_clean = doc_id_normalized
-                for prefix in ['progression', 'module', 'tank', 'war', 'monetization', 'character', 'combat']:
-                    doc_clean = doc_clean.replace(prefix, '')
+                for prefix in [
+                    "progression",
+                    "module",
+                    "tank",
+                    "war",
+                    "monetization",
+                    "character",
+                    "combat",
+                ]:
+                    doc_clean = doc_clean.replace(prefix, "")
 
                 if message_clean and doc_clean:
                     if message_clean in doc_clean or doc_clean in message_clean:
@@ -808,17 +957,35 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
 
                 # Strategy 2: Check file name (stem)
                 if file_name:
-                    file_name_normalized = file_name.lower().replace("[", "").replace(
-                        "]", "").replace(",", "").replace("_", "").replace("-", "").replace(" ", "")
-                    if file_name_normalized in message_normalized or any(word in file_name_normalized for word in message_normalized.split() if len(word) > 4):
+                    file_name_normalized = (
+                        file_name.lower()
+                        .replace("[", "")
+                        .replace("]", "")
+                        .replace(",", "")
+                        .replace("_", "")
+                        .replace("-", "")
+                        .replace(" ", "")
+                    )
+                    if file_name_normalized in message_normalized or any(
+                        word in file_name_normalized
+                        for word in message_normalized.split()
+                        if len(word) > 4
+                    ):
                         target_doc_id = doc_id
                         break
 
                 # Strategy 3: Check file path
                 if file_path:
-                    file_stem = Path(file_path).stem.lower().replace(
-                        "_", "").replace("-", "").replace(" ", "")
-                    if file_stem in message_normalized or any(word in file_stem for word in message_normalized.split() if len(word) > 4):
+                    file_stem = (
+                        Path(file_path)
+                        .stem.lower()
+                        .replace("_", "")
+                        .replace("-", "")
+                        .replace(" ", "")
+                    )
+                    if file_stem in message_normalized or any(
+                        word in file_stem for word in message_normalized.split() if len(word) > 4
+                    ):
                         target_doc_id = doc_id
                         break
 
@@ -838,30 +1005,46 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
         if is_extract_request and target_doc_id:
             full_content = extract_full_document(target_doc_id)
             return {
-                'response': f"**Full Document: {target_doc_id}**\n\n{full_content}",
-                'status': 'success'
+                "response": f"**Full Document: {target_doc_id}**\n\n{full_content}",
+                "status": "success",
             }
 
         # If extract request but no specific document, try to find one from query
         if is_extract_request and not target_doc_id:
             # Try to find document from query text
             for doc_id in indexed_doc_ids:
-                doc_id_normalized = doc_id.lower().replace("[", "").replace("]", "").replace(
-                    ",", "").replace("_", "").replace("-", "").replace(" ", "")
-                message_normalized = message_lower.replace("[", "").replace("]", "").replace(
-                    ",", "").replace("_", "").replace("-", "").replace(" ", "")
+                doc_id_normalized = (
+                    doc_id.lower()
+                    .replace("[", "")
+                    .replace("]", "")
+                    .replace(",", "")
+                    .replace("_", "")
+                    .replace("-", "")
+                    .replace(" ", "")
+                )
+                message_normalized = (
+                    message_lower.replace("[", "")
+                    .replace("]", "")
+                    .replace(",", "")
+                    .replace("_", "")
+                    .replace("-", "")
+                    .replace(" ", "")
+                )
 
-                if doc_id_normalized in message_normalized or message_normalized in doc_id_normalized:
+                if (
+                    doc_id_normalized in message_normalized
+                    or message_normalized in doc_id_normalized
+                ):
                     full_content = extract_full_document(doc_id)
                     return {
-                        'response': f"**Full Document: {doc_id}**\n\n{full_content}",
-                        'status': 'success'
+                        "response": f"**Full Document: {doc_id}**\n\n{full_content}",
+                        "status": "success",
                     }
 
             # If still no match, return error
             return {
-                'response': 'Please specify which document to extract. You can select a document from the dropdown or mention the document name in your query.',
-                'status': 'error'
+                "response": "Please specify which document to extract. You can select a document from the dropdown or mention the document name in your query.",
+                "status": "error",
             }
 
         # For all other queries, use the normal RAG system (chunk-based retrieval)
@@ -870,23 +1053,24 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
             # Check if a document was selected but not indexed
             if target_doc_id:
                 return {
-                    'response': f'Document "{target_doc_id}" is not indexed in Supabase. Please index it first before querying. You can use "extract entire doc" or "extract all doc" to view the full document without indexing.',
-                    'status': 'error'
+                    "response": f'Document "{target_doc_id}" is not indexed in Supabase. Please index it first before querying. You can use "extract entire doc" or "extract all doc" to view the full document without indexing.',
+                    "status": "error",
                 }
             else:
                 return {
-                    'response': 'No indexed documents available for querying. Please ensure documents are indexed in Supabase.',
-                    'status': 'error'
+                    "response": "No indexed documents available for querying. Please ensure documents are indexed in Supabase.",
+                    "status": "error",
                 }
 
         # Create provider and query
         try:
             from backend.services.llm_provider import SimpleLLMProvider
+
             provider = SimpleLLMProvider()
         except Exception as e:
             return {
-                'response': f'Error: Could not initialize LLM provider. Please check your API key in .env file.\n\nError: {str(e)}',
-                'status': 'error'
+                "response": f"Error: Could not initialize LLM provider. Please check your API key in .env file.\n\nError: {str(e)}",
+                "status": "error",
             }
 
         # Query only markdown documents using RAG (chunk-based retrieval)
@@ -894,20 +1078,22 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
         try:
             if not SUPABASE_AVAILABLE:
                 return {
-                    'response': 'Supabase is not configured. Please configure SUPABASE_URL and SUPABASE_KEY in your .env file.',
-                    'status': 'error'
+                    "response": "Supabase is not configured. Please configure SUPABASE_URL and SUPABASE_KEY in your .env file.",
+                    "status": "error",
                 }
 
             # Determine which documents to query
             import logging
+
             logger = logging.getLogger(__name__)
-            logger.info("="*80)
+            logger.info("=" * 80)
             logger.info("[GDD SERVICE] Starting retrieval")
             logger.info(f"[GDD SERVICE] Query: {query}")
             logger.info(
                 f"[GDD SERVICE] target_doc_id (from @ syntax or dropdown): {target_doc_id}")
             logger.info(
-                f"[GDD SERVICE] indexed_doc_ids (all available): {indexed_doc_ids[:5]}... (total: {len(indexed_doc_ids)})")
+                f"[GDD SERVICE] indexed_doc_ids (all available): {indexed_doc_ids[:5]}... (total: {len(indexed_doc_ids)})"
+            )
 
             # If target_doc_id is specified, use only that document
             if target_doc_id:
@@ -916,12 +1102,13 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
                 doc_ids_to_query = [target_doc_id]
             else:
                 logger.info(
-                    f"[GDD SERVICE] Using all indexed_doc_ids: {len(indexed_doc_ids)} documents")
+                    f"[GDD SERVICE] Using all indexed_doc_ids: {len(indexed_doc_ids)} documents"
+                )
                 doc_ids_to_query = indexed_doc_ids
 
             logger.info(
                 f"[GDD SERVICE] Final doc_ids_to_query: {doc_ids_to_query}")
-            logger.info("="*80)
+            logger.info("=" * 80)
 
             # Enhanced retrieval with HYDE and section targeting
             markdown_chunks, retrieval_metrics = get_gdd_top_chunks_supabase(
@@ -938,19 +1125,22 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
                 f"[GDD Query] Retrieval metrics: {retrieval_metrics.get('timing', {})}")
             if markdown_chunks:
                 logger.info(
-                    f"[GDD Query] Chunk doc_ids: {[c.get('doc_id') for c in markdown_chunks]}")
+                    f"[GDD Query] Chunk doc_ids: {[c.get('doc_id') for c in markdown_chunks]}"
+                )
                 logger.info(
-                    f"[GDD Query] Section distribution: {retrieval_metrics.get('section_distribution', {})}")
+                    f"[GDD Query] Section distribution: {retrieval_metrics.get('section_distribution', {})}"
+                )
 
             # Validate chunks belong to requested documents
             valid_chunks = []
             for chunk in markdown_chunks:
-                chunk_doc_id = chunk.get('doc_id', '')
+                chunk_doc_id = chunk.get("doc_id", "")
                 if chunk_doc_id in doc_ids_to_query:
                     valid_chunks.append(chunk)
                 else:
                     logger.warning(
-                        f"[GDD Query] WARNING: Chunk from doc_id '{chunk_doc_id}' not in requested list {doc_ids_to_query}. Filtering out.")
+                        f"[GDD Query] WARNING: Chunk from doc_id '{chunk_doc_id}' not in requested list {doc_ids_to_query}. Filtering out."
+                    )
 
             markdown_chunks = valid_chunks
             logger.info(
@@ -970,36 +1160,42 @@ def query_gdd_documents(query: str, selected_doc: str = None, language: str = No
                         detected_language = "en"
 
                 # Else detect from retrieval metrics or fallback to detection function
-                if detected_language is None and retrieval_metrics and 'language_detection' in retrieval_metrics:
-                    lang_info = retrieval_metrics.get('language_detection', {})
+                if (
+                    detected_language is None
+                    and retrieval_metrics
+                    and "language_detection" in retrieval_metrics
+                ):
+                    lang_info = retrieval_metrics.get("language_detection", {})
                     detected_language = lang_info.get(
-                        'detected_language', None)
+                        "detected_language", None)
 
                 if detected_language is None:
                     detected_language = _detect_question_language(query)
                     # Convert to 'en' or 'vi' format to match retrieval metrics
-                    if detected_language == 'english':
-                        detected_language = 'en'
-                    elif detected_language == 'vietnamese':
-                        detected_language = 'vi'
+                    if detected_language == "english":
+                        detected_language = "en"
+                    elif detected_language == "vietnamese":
+                        detected_language = "vi"
 
                 # Determine response language instruction
-                if detected_language == 'vi' or detected_language == 'vietnamese':
+                if detected_language == "vi" or detected_language == "vietnamese":
                     language_instruction = "IMPORTANT: Respond in Vietnamese (Tiếng Việt). Your entire answer must be in Vietnamese."
                 else:
-                    language_instruction = "IMPORTANT: Respond in English. Your entire answer must be in English."
+                    language_instruction = (
+                        "IMPORTANT: Respond in English. Your entire answer must be in English."
+                    )
 
                 # Enhanced prompt with section information
                 chunk_texts_with_sections = []
                 for i, chunk in enumerate(selected_chunks):
                     section_info = ""
-                    if chunk.get('numbered_header'):
+                    if chunk.get("numbered_header"):
                         section_info = f" [Section: {chunk.get('numbered_header')}]"
-                    elif chunk.get('section_path'):
+                    elif chunk.get("section_path"):
                         section_info = f" [Section: {chunk.get('section_path')}]"
 
                     chunk_texts_with_sections.append(
-                        f"[Chunk {i+1} from {chunk['doc_id']}{section_info}]\n{chunk['content']}"
+                        f"[Chunk {i + 1} from {chunk['doc_id']}{section_info}]\n{chunk['content']}"
                     )
 
                 chunk_texts_enhanced = "\n\n".join(chunk_texts_with_sections)
@@ -1023,41 +1219,40 @@ Provide a clear, comprehensive answer based on the chunks above. If chunks refer
                         detected_language = "vi"
                     elif lang_lower in ("en", "english"):
                         detected_language = "en"
-                if detected_language is None and retrieval_metrics and 'language_detection' in retrieval_metrics:
-                    lang_info = retrieval_metrics.get('language_detection', {})
+                if (
+                    detected_language is None
+                    and retrieval_metrics
+                    and "language_detection" in retrieval_metrics
+                ):
+                    lang_info = retrieval_metrics.get("language_detection", {})
                     detected_language = lang_info.get(
-                        'detected_language', None)
+                        "detected_language", None)
                 if detected_language is None:
                     detected_language = _detect_question_language(query)
-                    if detected_language == 'english':
-                        detected_language = 'en'
-                    elif detected_language == 'vietnamese':
-                        detected_language = 'vi'
+                    if detected_language == "english":
+                        detected_language = "en"
+                    elif detected_language == "vietnamese":
+                        detected_language = "vi"
 
-                if detected_language == 'vi' or detected_language == 'vietnamese':
+                if detected_language == "vi" or detected_language == "vietnamese":
                     answer = "Không tìm thấy đoạn tài liệu liên quan trong các tài liệu markdown."
                 else:
                     answer = "No relevant chunks found in markdown documents."
 
-            return {
-                'response': answer,
-                'status': 'success'
-            }
+            return {"response": answer, "status": "success"}
         except Exception as e:
             error_msg = str(e)
-            if "401" in error_msg or "API key" in error_msg or "authentication" in error_msg.lower():
+            if (
+                "401" in error_msg
+                or "API key" in error_msg
+                or "authentication" in error_msg.lower()
+            ):
                 return {
-                    'response': f'API Key Error: Please check your Qwen/DashScope API key in the .env file.\n\nFound {len(indexed_doc_ids)} indexed markdown documents ready to query once API key is configured.\n\nError details: {error_msg}',
-                    'status': 'error'
+                    "response": f"API Key Error: Please check your Qwen/DashScope API key in the .env file.\n\nFound {len(indexed_doc_ids)} indexed markdown documents ready to query once API key is configured.\n\nError details: {error_msg}",
+                    "status": "error",
                 }
             else:
-                return {
-                    'response': f'Error querying documents: {error_msg}',
-                    'status': 'error'
-                }
+                return {"response": f"Error querying documents: {error_msg}", "status": "error"}
 
     except Exception as e:
-        return {
-            'response': f'Error: {str(e)}',
-            'status': 'error'
-        }
+        return {"response": f"Error: {str(e)}", "status": "error"}

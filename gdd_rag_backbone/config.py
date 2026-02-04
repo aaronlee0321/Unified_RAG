@@ -1,6 +1,7 @@
 """
 Global configuration for the GDD RAG Backbone system.
 """
+
 import os
 from pathlib import Path
 from typing import Optional
@@ -8,6 +9,7 @@ from typing import Optional
 # Try to load .env file if python-dotenv is available
 try:
     from dotenv import load_dotenv
+
     # Load .env file from project root
     PROJECT_ROOT = Path(__file__).parent.parent
     env_path = PROJECT_ROOT / ".env"
@@ -37,7 +39,9 @@ DEFAULT_ENABLE_EQUATION_PROCESSING = True
 # Check both DASHSCOPE_API_KEY (DashScope library standard) and QWEN_API_KEY (custom)
 # DASHSCOPE_API_KEY takes priority as it's what the dashscope library expects
 QWEN_API_KEY: Optional[str] = os.getenv("DASHSCOPE_API_KEY") or os.getenv("QWEN_API_KEY")
-DASHSCOPE_REGION: Optional[str] = os.getenv("REGION", "intl")  # Region for DashScope (e.g., "intl", "cn")
+DASHSCOPE_REGION: Optional[str] = os.getenv(
+    "REGION", "intl"
+)  # Region for DashScope (e.g., "intl", "cn")
 
 # Set base URL based on region (INTL vs CN)
 # INTL region uses dashscope-intl.aliyuncs.com
@@ -47,7 +51,9 @@ if DASHSCOPE_REGION and DASHSCOPE_REGION.lower() == "intl":
 elif DASHSCOPE_REGION and DASHSCOPE_REGION.lower() == "cn":
     DEFAULT_QWEN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 else:
-    DEFAULT_QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"  # Default to INTL
+    DEFAULT_QWEN_BASE_URL = (
+        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"  # Default to INTL
+    )
 
 QWEN_BASE_URL: Optional[str] = os.getenv("QWEN_BASE_URL", DEFAULT_QWEN_BASE_URL)
 
@@ -62,4 +68,3 @@ DEFAULT_EMBEDDING_MODEL = os.getenv("DEFAULT_EMBEDDING_MODEL", "text-embedding-3
 DEFAULT_WORKING_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_DOCS_DIR.mkdir(parents=True, exist_ok=True)
-

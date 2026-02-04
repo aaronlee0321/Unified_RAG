@@ -28,7 +28,9 @@ SYSTEM_PROMPT = (
 )
 
 
-async def analyze_gdd(doc_id: str, *, provider: Optional[QwenProvider] = None, top_k: int = 8) -> str:
+async def analyze_gdd(
+    doc_id: str, *, provider: Optional[QwenProvider] = None, top_k: int = 8
+) -> str:
     """Return a narrative summary describing the provided GDD."""
     active_provider = provider or QwenProvider()
     llm_func = make_llm_model_func(active_provider)
@@ -49,4 +51,3 @@ async def analyze_gdd(doc_id: str, *, provider: Optional[QwenProvider] = None, t
     )
     response = await llm_func(prompt=prompt, system_prompt=SYSTEM_PROMPT, temperature=0.3)
     return response.strip()
-

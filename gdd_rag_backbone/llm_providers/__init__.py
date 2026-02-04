@@ -20,4 +20,3 @@ __all__ = [
     "make_embedding_func",
     "QwenProvider",
 ]
-

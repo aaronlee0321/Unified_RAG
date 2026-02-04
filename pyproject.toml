@@ -1,0 +1,6 @@
+[project]
+name = "unified-rag"
+version = "0.1.0"
+description = "Unified RAG Web Application"
+readme = "SETUP.md"
+requires-python = "==3.11.*"

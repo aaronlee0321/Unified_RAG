@@ -12,6 +12,7 @@ from typing import List, Optional, Tuple
 @dataclass
 class MarkdownSection:
     """Represents a section in a markdown document."""
+
     level: int  # Header level (1 for ##, 2 for ###, etc.)
     header: str  # Header text (without # symbols)
     content: str  # Section content (everything until next header)
@@ -25,10 +26,11 @@ class MarkdownParser:
 
     def __init__(self):
         # Pattern to match headers: ## Header or ### Header
-        self.header_pattern = re.compile(r'^(#{2,})\s+(.+)$', re.MULTILINE)
+        self.header_pattern = re.compile(r"^(#{2,})\s+(.+)$", re.MULTILINE)
         # Pattern to match numbered sections: 4.1, 5.2, etc.
         self.numbered_section_pattern = re.compile(
-            r'^#{2,}\s+(\d+\.\d+[\.\d]*)\s+(.+)$', re.MULTILINE)
+            r"^#{2,}\s+(\d+\.\d+[\.\d]*)\s+(.+)$", re.MULTILINE
+        )
 
     def parse(self, markdown_content: str) -> List[MarkdownSection]:
         """
@@ -40,12 +42,11 @@ class MarkdownParser:
         Returns:
             List of MarkdownSection objects
         """
-        lines = markdown_content.split('\n')
+        lines = markdown_content.split("\n")
         sections: List[MarkdownSection] = []
 
         current_section: Optional[MarkdownSection] = None
         current_content: List[str] = []
-        current_level = 0
         # Stack to track (level, header) pairs
         parent_stack: List[Tuple[int, str]] = []
 
@@ -56,8 +57,7 @@ class MarkdownParser:
             if header_match:
                 # Save previous section if exists
                 if current_section is not None:
-                    current_section.content = '\n'.join(
-                        current_content).strip()
+                    current_section.content = "\n".join(current_content).strip()
                     current_section.line_end = i - 1
                     sections.append(current_section)
 
@@ -67,8 +67,7 @@ class MarkdownParser:
 
                 # Update parent stack based on level
                 # Remove parents at same or deeper level
-                parent_stack = [(lvl, hdr)
-                                for lvl, hdr in parent_stack if lvl < header_level]
+                parent_stack = [(lvl, hdr) for lvl, hdr in parent_stack if lvl < header_level]
 
                 # Determine parent header (last header at shallower level)
                 parent_header = parent_stack[-1][1] if parent_stack else None
@@ -83,10 +82,9 @@ class MarkdownParser:
                     content="",
                     line_start=i,
                     line_end=i,
-                    parent_header=parent_header
+                    parent_header=parent_header,
                 )
                 current_content = []
-                current_level = header_level
             else:
                 # Add line to current section content
                 if current_section is not None:
@@ -97,19 +95,21 @@ class MarkdownParser:
 
         # Save last section
         if current_section is not None:
-            current_section.content = '\n'.join(current_content).strip()
+            current_section.content = "\n".join(current_content).strip()
             current_section.line_end = len(lines) - 1
             sections.append(current_section)
         elif current_content:
             # No headers found, create a single section with all content
-            sections.append(MarkdownSection(
-                level=0,
-                header="",
-                content='\n'.join(current_content).strip(),
-                line_start=0,
-                line_end=len(lines) - 1,
-                parent_header=None
-            ))
+            sections.append(
+                MarkdownSection(
+                    level=0,
+                    header="",
+                    content="\n".join(current_content).strip(),
+                    line_start=0,
+                    line_end=len(lines) - 1,
+                    parent_header=None,
+                )
+            )
 
         return sections
 
@@ -140,7 +140,7 @@ class MarkdownParser:
         Returns:
             List of paragraphs
         """
-        paragraphs = re.split(r'\n\s*\n', content)
+        paragraphs = re.split(r"\n\s*\n", content)
         return [p.strip() for p in paragraphs if p.strip()]
 
     def split_by_sentences(self, content: str) -> List[str]:
@@ -154,7 +154,7 @@ class MarkdownParser:
             List of sentences
         """
         # Split on sentence endings: . ! ? followed by space or newline
-        sentences = re.split(r'([.!?])\s+', content)
+        sentences = re.split(r"([.!?])\s+", content)
         # Rejoin sentence endings with their sentences
         result = []
         for i in range(0, len(sentences) - 1, 2):
@@ -177,15 +177,15 @@ class MarkdownParser:
             List of list items (with their bullets)
         """
         # Match lines starting with - or * or numbered lists
-        lines = content.split('\n')
+        lines = content.split("\n")
         items = []
         current_item = []
 
         for line in lines:
             # Check if line is a list item
-            if re.match(r'^\s*[-*]\s+', line) or re.match(r'^\s*\d+[.)]\s+', line):
+            if re.match(r"^\s*[-*]\s+", line) or re.match(r"^\s*\d+[.)]\s+", line):
                 if current_item:
-                    items.append('\n'.join(current_item).strip())
+                    items.append("\n".join(current_item).strip())
                 current_item = [line]
             else:
                 if current_item:
@@ -196,6 +196,6 @@ class MarkdownParser:
                         items.append(line.strip())
 
         if current_item:
-            items.append('\n'.join(current_item).strip())
+            items.append("\n".join(current_item).strip())
 
         return [item for item in items if item]

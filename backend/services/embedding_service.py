@@ -3,8 +3,9 @@ Embedding service (optional) for keyword extractor.
 Computes embeddings for chunks and stores them in pgvector column.
 EXACT COPY from keyword_extractor - adapted for unified_rag_app.
 """
-from typing import List, Dict, Optional
+
 import os
+from typing import Dict, List, Optional
 
 from backend.storage.supabase_client import get_supabase_client
 
@@ -66,14 +67,17 @@ def embed_document_chunks(doc_id: str, model: Optional[str] = None, batch_size: 
     if not openai_client:
         return 0
     from backend.shared.config import DEFAULT_EMBEDDING_MODEL
-    embedding_model = model or os.getenv(
-        "EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL
-    use_mode = "openai_compatible"
+
+    embedding_model = model or os.getenv("EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL
 
     # Fetch chunks without embeddings (or re-embed all)
     # Note: Supabase python client doesn't support vector IS NULL directly; fetch content+ids
-    resp = client.table("keyword_chunks").select(
-        "id, chunk_id, content").eq("doc_id", doc_id).execute()
+    resp = (
+        client.table("keyword_chunks")
+        .select("id, chunk_id, content")
+        .eq("doc_id", doc_id)
+        .execute()
+    )
     chunks: List[Dict] = resp.data or []
     if not chunks:
         return 0
@@ -82,12 +86,11 @@ def embed_document_chunks(doc_id: str, model: Optional[str] = None, batch_size: 
 
     # Batch process
     for i in range(0, len(chunks), batch_size):
-        batch = chunks[i: i + batch_size]
+        batch = chunks[i : i + batch_size]
         texts = [c["content"] for c in batch]
 
         # Call embedding API
-        emb = openai_client.embeddings.create(
-            model=embedding_model, input=texts)
+        emb = openai_client.embeddings.create(model=embedding_model, input=texts)
         vectors = [e.embedding for e in emb.data]
 
         # Upsert embeddings back per row

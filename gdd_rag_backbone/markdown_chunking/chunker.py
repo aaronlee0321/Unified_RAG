@@ -6,8 +6,7 @@ Implements document-based (structure-first) chunking with recursive fallback.
 
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Dict
-from pathlib import Path
+from typing import Dict, List, Optional
 
 from gdd_rag_backbone.markdown_chunking.markdown_parser import MarkdownParser, MarkdownSection
 from gdd_rag_backbone.markdown_chunking.metadata_extractor import MetadataExtractor
@@ -17,6 +16,7 @@ from gdd_rag_backbone.markdown_chunking.tokenizer_utils import count_tokens
 @dataclass
 class MarkdownChunk:
     """Represents a chunk of markdown content."""
+
     chunk_id: str
     doc_id: str
     content: str
@@ -33,7 +33,7 @@ class MarkdownChunker:
         self,
         chunk_size_tokens: int = 800,
         chunk_overlap_tokens: int = 80,
-        max_chunk_size: int = 1000
+        max_chunk_size: int = 1000,
     ):
         """
         Initialize chunker.
@@ -51,10 +51,7 @@ class MarkdownChunker:
         self.chunk_counter = 0
 
     def chunk_document(
-        self,
-        markdown_content: str,
-        doc_id: str,
-        filename: str = ""
+        self, markdown_content: str, doc_id: str, filename: str = ""
     ) -> List[MarkdownChunk]:
         """
         Chunk a markdown document.
@@ -72,8 +69,7 @@ class MarkdownChunker:
 
         # Extract document title
         document_title = self.parser.extract_document_title(markdown_content)
-        doc_metadata = self.metadata_extractor.extract_document_metadata(
-            document_title, filename)
+        doc_metadata = self.metadata_extractor.extract_document_metadata(document_title, filename)
 
         # Parse markdown into sections
         sections = self.parser.parse(markdown_content)
@@ -84,7 +80,7 @@ class MarkdownChunker:
                 section=section,
                 doc_id=doc_id,
                 document_title=document_title,
-                doc_metadata=doc_metadata
+                doc_metadata=doc_metadata,
             )
             chunks.extend(section_chunks)
 
@@ -95,7 +91,7 @@ class MarkdownChunker:
         section: MarkdownSection,
         doc_id: str,
         document_title: str,
-        doc_metadata: Dict[str, str]
+        doc_metadata: Dict[str, str],
     ) -> List[MarkdownChunk]:
         """
         Chunk a single section.
@@ -120,16 +116,18 @@ class MarkdownChunker:
 
         # If section fits in one chunk, return it
         if token_count <= self.chunk_size_tokens:
-            return [self._create_chunk(
-                content=full_content,
-                doc_id=doc_id,
-                section_header=section.header,
-                section_content=section.content,
-                document_title=document_title,
-                doc_metadata=doc_metadata,
-                parent_header=None,
-                part_number=None
-            )]
+            return [
+                self._create_chunk(
+                    content=full_content,
+                    doc_id=doc_id,
+                    section_header=section.header,
+                    section_content=section.content,
+                    document_title=document_title,
+                    doc_metadata=doc_metadata,
+                    parent_header=None,
+                    part_number=None,
+                )
+            ]
 
         # Section is too long - need to split
         # First, try splitting by sub-headers (### or numbered sections)
@@ -143,17 +141,14 @@ class MarkdownChunker:
                     section=sub_section,
                     doc_id=doc_id,
                     document_title=document_title,
-                    doc_metadata=doc_metadata
+                    doc_metadata=doc_metadata,
                 )
                 chunks.extend(sub_chunks)
             return chunks
 
         # No sub-headers found - use recursive chunking
         return self._chunk_recursive(
-            section=section,
-            doc_id=doc_id,
-            document_title=document_title,
-            doc_metadata=doc_metadata
+            section=section, doc_id=doc_id, document_title=document_title, doc_metadata=doc_metadata
         )
 
     def _split_by_subheaders(self, section: MarkdownSection) -> List[MarkdownSection]:
@@ -168,7 +163,7 @@ class MarkdownChunker:
         """
         # Look for ### headers or numbered sections (4.1, 4.2, etc.)
         content = section.content
-        lines = content.split('\n')
+        lines = content.split("\n")
 
         sub_sections: List[MarkdownSection] = []
         current_sub_content: List[str] = []
@@ -177,24 +172,25 @@ class MarkdownChunker:
 
         for i, line in enumerate(lines):
             # Check for ### header
-            h3_match = re.match(r'^###\s+(.+)$', line)
+            h3_match = re.match(r"^###\s+(.+)$", line)
             # Check for numbered section in header format
-            numbered_match = re.match(
-                r'^#{2,}\s+(\d+\.\d+[\.\d]*)\s+(.+)$', line)
+            numbered_match = re.match(r"^#{2,}\s+(\d+\.\d+[\.\d]*)\s+(.+)$", line)
 
             if h3_match or numbered_match:
                 # Save previous sub-section
                 if current_sub_header is not None or current_sub_content:
-                    sub_content = '\n'.join(current_sub_content).strip()
+                    sub_content = "\n".join(current_sub_content).strip()
                     if sub_content:
-                        sub_sections.append(MarkdownSection(
-                            level=3,
-                            header=current_sub_header or "",
-                            content=sub_content,
-                            line_start=line_start,
-                            line_end=section.line_start + i - 1,
-                            parent_header=section.header
-                        ))
+                        sub_sections.append(
+                            MarkdownSection(
+                                level=3,
+                                header=current_sub_header or "",
+                                content=sub_content,
+                                line_start=line_start,
+                                line_end=section.line_start + i - 1,
+                                parent_header=section.header,
+                            )
+                        )
 
                 # Start new sub-section
                 if h3_match:
@@ -208,16 +204,18 @@ class MarkdownChunker:
 
         # Save last sub-section
         if current_sub_header is not None or current_sub_content:
-            sub_content = '\n'.join(current_sub_content).strip()
+            sub_content = "\n".join(current_sub_content).strip()
             if sub_content:
-                sub_sections.append(MarkdownSection(
-                    level=3,
-                    header=current_sub_header or "",
-                    content=sub_content,
-                    line_start=line_start,
-                    line_end=section.line_end,
-                    parent_header=section.header
-                ))
+                sub_sections.append(
+                    MarkdownSection(
+                        level=3,
+                        header=current_sub_header or "",
+                        content=sub_content,
+                        line_start=line_start,
+                        line_end=section.line_end,
+                        parent_header=section.header,
+                    )
+                )
 
         # If we found sub-sections, return them; otherwise return original
         if len(sub_sections) > 1:
@@ -230,7 +228,7 @@ class MarkdownChunker:
         section: MarkdownSection,
         doc_id: str,
         document_title: str,
-        doc_metadata: Dict[str, str]
+        doc_metadata: Dict[str, str],
     ) -> List[MarkdownChunk]:
         """
         Recursively chunk a long section.
@@ -266,28 +264,29 @@ class MarkdownChunker:
                 # If adding this paragraph would exceed limit
                 if current_tokens + para_tokens > self.chunk_size_tokens and current_chunk_parts:
                     # Save current chunk
-                    chunk_content = '\n\n'.join(current_chunk_parts)
+                    chunk_content = "\n\n".join(current_chunk_parts)
                     if parent_header:
                         chunk_content = f"## {parent_header} (Part {part_num})\n\n{chunk_content}"
 
-                    chunks.append(self._create_chunk(
-                        content=chunk_content,
-                        doc_id=doc_id,
-                        section_header=parent_header,
-                        section_content=chunk_content,
-                        document_title=document_title,
-                        doc_metadata=doc_metadata,
-                        parent_header=parent_header,
-                        part_number=part_num
-                    ))
+                    chunks.append(
+                        self._create_chunk(
+                            content=chunk_content,
+                            doc_id=doc_id,
+                            section_header=parent_header,
+                            section_content=chunk_content,
+                            document_title=document_title,
+                            doc_metadata=doc_metadata,
+                            parent_header=parent_header,
+                            part_number=part_num,
+                        )
+                    )
 
                     # Start new chunk with overlap
                     overlap_text = self._get_overlap_text(
-                        current_chunk_parts[-1] if current_chunk_parts else "")
-                    current_chunk_parts = [overlap_text,
-                                           para] if overlap_text else [para]
-                    current_tokens = count_tokens(
-                        '\n\n'.join(current_chunk_parts))
+                        current_chunk_parts[-1] if current_chunk_parts else ""
+                    )
+                    current_chunk_parts = [overlap_text, para] if overlap_text else [para]
+                    current_tokens = count_tokens("\n\n".join(current_chunk_parts))
                     part_num += 1
                 else:
                     current_chunk_parts.append(para)
@@ -295,20 +294,22 @@ class MarkdownChunker:
 
             # Save last chunk
             if current_chunk_parts:
-                chunk_content = '\n\n'.join(current_chunk_parts)
+                chunk_content = "\n\n".join(current_chunk_parts)
                 if parent_header:
                     chunk_content = f"## {parent_header} (Part {part_num})\n\n{chunk_content}"
 
-                chunks.append(self._create_chunk(
-                    content=chunk_content,
-                    doc_id=doc_id,
-                    section_header=parent_header,
-                    section_content=chunk_content,
-                    document_title=document_title,
-                    doc_metadata=doc_metadata,
-                    parent_header=parent_header,
-                    part_number=part_num
-                ))
+                chunks.append(
+                    self._create_chunk(
+                        content=chunk_content,
+                        doc_id=doc_id,
+                        section_header=parent_header,
+                        section_content=chunk_content,
+                        document_title=document_title,
+                        doc_metadata=doc_metadata,
+                        parent_header=parent_header,
+                        part_number=part_num,
+                    )
+                )
 
             return chunks
 
@@ -325,20 +326,22 @@ class MarkdownChunker:
                 item_tokens = count_tokens(item)
 
                 if current_tokens + item_tokens > self.chunk_size_tokens and current_chunk_parts:
-                    chunk_content = '\n'.join(current_chunk_parts)
+                    chunk_content = "\n".join(current_chunk_parts)
                     if parent_header:
                         chunk_content = f"## {parent_header} (Part {part_num})\n\n{chunk_content}"
 
-                    chunks.append(self._create_chunk(
-                        content=chunk_content,
-                        doc_id=doc_id,
-                        section_header=parent_header,
-                        section_content=chunk_content,
-                        document_title=document_title,
-                        doc_metadata=doc_metadata,
-                        parent_header=parent_header,
-                        part_number=part_num
-                    ))
+                    chunks.append(
+                        self._create_chunk(
+                            content=chunk_content,
+                            doc_id=doc_id,
+                            section_header=parent_header,
+                            section_content=chunk_content,
+                            document_title=document_title,
+                            doc_metadata=doc_metadata,
+                            parent_header=parent_header,
+                            part_number=part_num,
+                        )
+                    )
 
                     current_chunk_parts = [item]
                     current_tokens = item_tokens
@@ -348,20 +351,22 @@ class MarkdownChunker:
                     current_tokens += item_tokens
 
             if current_chunk_parts:
-                chunk_content = '\n'.join(current_chunk_parts)
+                chunk_content = "\n".join(current_chunk_parts)
                 if parent_header:
                     chunk_content = f"## {parent_header} (Part {part_num})\n\n{chunk_content}"
 
-                chunks.append(self._create_chunk(
-                    content=chunk_content,
-                    doc_id=doc_id,
-                    section_header=parent_header,
-                    section_content=chunk_content,
-                    document_title=document_title,
-                    doc_metadata=doc_metadata,
-                    parent_header=parent_header,
-                    part_number=part_num
-                ))
+                chunks.append(
+                    self._create_chunk(
+                        content=chunk_content,
+                        doc_id=doc_id,
+                        section_header=parent_header,
+                        section_content=chunk_content,
+                        document_title=document_title,
+                        doc_metadata=doc_metadata,
+                        parent_header=parent_header,
+                        part_number=part_num,
+                    )
+                )
 
             return chunks
 
@@ -376,26 +381,27 @@ class MarkdownChunker:
             sentence_tokens = count_tokens(sentence)
 
             if current_tokens + sentence_tokens > self.chunk_size_tokens and current_chunk_parts:
-                chunk_content = ' '.join(current_chunk_parts)
+                chunk_content = " ".join(current_chunk_parts)
                 if parent_header:
                     chunk_content = f"## {parent_header} (Part {part_num})\n\n{chunk_content}"
 
-                chunks.append(self._create_chunk(
-                    content=chunk_content,
-                    doc_id=doc_id,
-                    section_header=parent_header,
-                    section_content=chunk_content,
-                    document_title=document_title,
-                    doc_metadata=doc_metadata,
-                    parent_header=parent_header,
-                    part_number=part_num
-                ))
+                chunks.append(
+                    self._create_chunk(
+                        content=chunk_content,
+                        doc_id=doc_id,
+                        section_header=parent_header,
+                        section_content=chunk_content,
+                        document_title=document_title,
+                        doc_metadata=doc_metadata,
+                        parent_header=parent_header,
+                        part_number=part_num,
+                    )
+                )
 
                 # Start new chunk with overlap (last few sentences)
-                overlap_sentences = self._get_overlap_sentences(
-                    current_chunk_parts)
+                overlap_sentences = self._get_overlap_sentences(current_chunk_parts)
                 current_chunk_parts = overlap_sentences + [sentence]
-                current_tokens = count_tokens(' '.join(current_chunk_parts))
+                current_tokens = count_tokens(" ".join(current_chunk_parts))
                 part_num += 1
             else:
                 current_chunk_parts.append(sentence)
@@ -403,20 +409,22 @@ class MarkdownChunker:
 
         # Save last chunk
         if current_chunk_parts:
-            chunk_content = ' '.join(current_chunk_parts)
+            chunk_content = " ".join(current_chunk_parts)
             if parent_header:
                 chunk_content = f"## {parent_header} (Part {part_num})\n\n{chunk_content}"
 
-            chunks.append(self._create_chunk(
-                content=chunk_content,
-                doc_id=doc_id,
-                section_header=parent_header,
-                section_content=chunk_content,
-                document_title=document_title,
-                doc_metadata=doc_metadata,
-                parent_header=parent_header,
-                part_number=part_num
-            ))
+            chunks.append(
+                self._create_chunk(
+                    content=chunk_content,
+                    doc_id=doc_id,
+                    section_header=parent_header,
+                    section_content=chunk_content,
+                    document_title=document_title,
+                    doc_metadata=doc_metadata,
+                    parent_header=parent_header,
+                    part_number=part_num,
+                )
+            )
 
         return chunks
 
@@ -449,7 +457,7 @@ class MarkdownChunker:
             else:
                 break
 
-        return ' '.join(overlap_sentences)
+        return " ".join(overlap_sentences)
 
     def _get_overlap_sentences(self, sentences: List[str]) -> List[str]:
         """
@@ -483,7 +491,7 @@ class MarkdownChunker:
         document_title: str,
         doc_metadata: Dict[str, str],
         parent_header: Optional[str],
-        part_number: Optional[int]
+        part_number: Optional[int],
     ) -> MarkdownChunk:
         """
         Create a MarkdownChunk object.
@@ -508,14 +516,11 @@ class MarkdownChunker:
         section_metadata = self.metadata_extractor.extract_section_metadata(
             section_header=section_header,
             section_content=section_content,
-            document_title=document_title
+            document_title=document_title,
         )
 
         # Combine document and section metadata
-        metadata = {
-            **doc_metadata,
-            **section_metadata
-        }
+        metadata = {**doc_metadata, **section_metadata}
 
         token_count = count_tokens(content)
 
@@ -526,5 +531,5 @@ class MarkdownChunker:
             metadata=metadata,
             parent_header=parent_header,
             part_number=part_number,
-            token_count=token_count
+            token_count=token_count,
         )

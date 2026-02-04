@@ -2,14 +2,16 @@
 Simple LLM provider wrapper for keyword extractor.
 Uses OpenAI-compatible APIs for both LLM and embeddings.
 """
-import os
+
 import logging
-from typing import Optional, List
+import os
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
 try:
     from openai import OpenAI
+
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
@@ -34,14 +36,18 @@ class SimpleLLMProvider:
             model: Model name (OpenAI-compatible model)
         """
         import logging
+
         logger = logging.getLogger(__name__)
 
         if not OPENAI_AVAILABLE:
-            raise ImportError(
-                "openai package is required. Install with: pip install openai")
+            raise ImportError("openai package is required. Install with: pip install openai")
 
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv(
-            "QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
+        self.api_key = (
+            api_key
+            or os.getenv("OPENAI_API_KEY")
+            or os.getenv("QWEN_API_KEY")
+            or os.getenv("DASHSCOPE_API_KEY")
+        )
         if not self.api_key:
             raise ValueError(
                 "No OpenAI-compatible API key found. "
@@ -52,15 +58,18 @@ class SimpleLLMProvider:
         if base_url:
             self.base_url = base_url
         else:
-            self.base_url = os.getenv(
-                "OPENAI_BASE_URL") or "https://api.openai.com/v1"
+            self.base_url = os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
 
         self.model = model or os.getenv("LLM_MODEL") or "gpt-4o-mini"
         # Embedding model: prefer OpenAI embedding (e.g. text-embedding-3-small) when using OpenAI
-        self.embedding_model = os.getenv("EMBEDDING_MODEL") or os.getenv(
-            "OPENAI_EMBEDDING_MODEL") or "text-embedding-3-small"
+        self.embedding_model = (
+            os.getenv("EMBEDDING_MODEL")
+            or os.getenv("OPENAI_EMBEDDING_MODEL")
+            or "text-embedding-3-small"
+        )
         logger.info(
-            f"[LLM Provider] Using OpenAI-compatible endpoint: {self.base_url} model={self.model} embedding={self.embedding_model}")
+            f"[LLM Provider] Using OpenAI-compatible endpoint: {self.base_url} model={self.model} embedding={self.embedding_model}"
+        )
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def embed(self, texts: List[str]) -> List[List[float]]:

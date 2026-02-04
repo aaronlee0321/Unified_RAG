@@ -22,7 +22,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar
 # Project imports
 from gdd_rag_backbone.gdd.schemas import (
     GddInteraction,
-    GddLogicRule,
     GddMap,
     GddObject,
     GddRequirement,
@@ -41,7 +40,9 @@ def _provider_bundle() -> Dict[str, QwenProvider]:
     return {"provider": QwenProvider()}
 
 
-async def _retrieve_context(doc_ids: Sequence[str], query: str, top_k: int) -> Tuple[str, QwenProvider]:
+async def _retrieve_context(
+    doc_ids: Sequence[str], query: str, top_k: int
+) -> Tuple[str, QwenProvider]:
     bundle = _provider_bundle()
     provider = bundle["provider"]
 
@@ -135,7 +136,9 @@ async def _extract_list(
     if not context.strip():
         raise ValueError("No relevant context retrieved for extraction. Re-index the document.")
     prompt = template.replace("{{CONTEXT}}", context)
-    response_text = await _call_llm(prompt, system_prompt, llm_func=llm_func, temperature=temperature)
+    response_text = await _call_llm(
+        prompt, system_prompt, llm_func=llm_func, temperature=temperature
+    )
     try:
         payload = _parse_json_array(response_text)
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
@@ -250,7 +253,9 @@ CONTEXT:
 
 
 async def extract_maps(doc_id: str, *, llm_func=None) -> List[GddMap]:
-    query = "Extract every map or level description including mode, scene, size, objectives, and notes."
+    query = (
+        "Extract every map or level description including mode, scene, size, objectives, and notes."
+    )
     system_prompt = "Return ONLY JSON arrays describing gameplay maps."
     template = """
 Capture every map specification in this context.
@@ -285,7 +290,9 @@ CONTEXT:
 
 
 async def extract_systems(doc_id: str, *, llm_func=None) -> List[GddSystem]:
-    query = "List all gameplay systems or subsystems, their descriptions, mechanics, and relationships."
+    query = (
+        "List all gameplay systems or subsystems, their descriptions, mechanics, and relationships."
+    )
     system_prompt = "Return ONLY JSON arrays describing each gameplay system."
     template = """
 Extract every gameplay system mentioned in the context.
@@ -445,9 +452,7 @@ async def extract_all_requirements(
     llm_func=None,
     top_k: int = 10,
 ) -> Dict[str, List[dict]]:
-    query = (
-        "Extract ALL objects, systems, rules, and requirements described in this document."
-    )
+    query = "Extract ALL objects, systems, rules, and requirements described in this document."
     context, _ = await _retrieve_context([doc_id], query, top_k)
     if not context.strip():
         raise ValueError("No context available for combined extraction.")
@@ -489,4 +494,3 @@ async def extract_all_requirements(
         "logic_rules": logic_rules,
         "requirements": requirements,
     }
-

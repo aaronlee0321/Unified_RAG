@@ -2,16 +2,21 @@
 Deep search service for keyword finder.
 Uses LLM to generate translations and synonyms, then searches aliases and database.
 """
+
 import json
+import logging
 import re
-from typing import List, Dict, Any, Set
+from typing import Any, Dict, List, Set
+
 from backend.services.llm_provider import SimpleLLMProvider
+from backend.services.search_service import keyword_search
 from backend.storage.keyword_storage import (
     find_keyword_by_alias,
+    get_all_keywords,
     list_all_aliases,
-    get_all_keywords
 )
-from backend.services.search_service import keyword_search
+
+logger = logging.getLogger(__name__)
 
 
 def detect_language(word: str) -> str:
@@ -21,14 +26,17 @@ def detect_language(word: str) -> str:
     """
     # Vietnamese characters
     vietnamese_chars = re.compile(
-        r'[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]', re.IGNORECASE)
+        r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]", re.IGNORECASE
+    )
 
     if vietnamese_chars.search(word):
-        return 'vi'
-    return 'en'
+        return "vi"
+    return "en"
 
 
-def generate_translation_and_synonyms(word: str, source_language: str, retry: bool = False) -> Dict[str, List[str]]:
+def generate_translation_and_synonyms(
+    word: str, source_language: str, retry: bool = False
+) -> Dict[str, List[str]]:
     """
     Use LLM to generate translation and synonyms.
 
@@ -43,7 +51,7 @@ def generate_translation_and_synonyms(word: str, source_language: str, retry: bo
     try:
         provider = SimpleLLMProvider()
 
-        target_language = 'vi' if source_language == 'en' else 'en'
+        target_language = "vi" if source_language == "en" else "en"
 
         retry_instruction = ""
         if retry:
@@ -69,31 +77,31 @@ Be concise and return only relevant words. Return ONLY the JSON, no other text."
             prompt,
             system_prompt="You are a helpful translation assistant. Return only valid JSON.",
             temperature=0.3,
-            max_tokens=200
+            max_tokens=200,
         )
 
         # Extract JSON from response
         response = response.strip()
-        if '```json' in response:
-            response = response.split('```json')[1].split('```')[0].strip()
-        elif '```' in response:
-            response = response.split('```')[1].split('```')[0].strip()
+        if "```json" in response:
+            response = response.split("```json")[1].split("```")[0].strip()
+        elif "```" in response:
+            response = response.split("```")[1].split("```")[0].strip()
 
         result = json.loads(response)
 
         return {
-            'translation': result.get('translation', ''),
-            'synonyms_en': result.get('synonyms_en', []) if source_language == 'en' else result.get('synonyms_en', []),
-            'synonyms_vi': result.get('synonyms_vi', []) if source_language == 'vi' else result.get('synonyms_vi', [])
+            "translation": result.get("translation", ""),
+            "synonyms_en": result.get("synonyms_en", [])
+            if source_language == "en"
+            else result.get("synonyms_en", []),
+            "synonyms_vi": result.get("synonyms_vi", [])
+            if source_language == "vi"
+            else result.get("synonyms_vi", []),
         }
 
-    except Exception as e:
+    except Exception:
         # Fallback: return empty results
-        return {
-            'translation': '',
-            'synonyms_en': [],
-            'synonyms_vi': []
-        }
+        return {"translation": "", "synonyms_en": [], "synonyms_vi": []}
 
 
 def check_words_against_aliases_and_database(words: List[str]) -> Dict[str, Any]:
@@ -120,7 +128,7 @@ def check_words_against_aliases_and_database(words: List[str]) -> Dict[str, Any]
         matches = find_keyword_by_alias(word_lower)
 
         if matches:
-            keyword_list = [m['keyword'] for m in matches]
+            keyword_list = [m["keyword"] for m in matches]
             matched_keywords_set.update(keyword_list)
             matches_by_word[word] = keyword_list
 
@@ -140,7 +148,7 @@ def check_words_against_aliases_and_database(words: List[str]) -> Dict[str, Any]
             if alias_matches:
                 # Word is an alias - get the base keyword
                 for match in alias_matches:
-                    base_keyword = match['keyword']
+                    base_keyword = match["keyword"]
                     matched_keywords_set.add(base_keyword)
                     if word not in matches_by_word:
                         matches_by_word[word] = []
@@ -167,15 +175,15 @@ def check_words_against_aliases_and_database(words: List[str]) -> Dict[str, Any]
 
         # Check if word matches any keyword or alias (case-insensitive)
         for alias_row in all_aliases:
-            keyword = alias_row.get('keyword', '').lower()
-            alias = alias_row.get('alias', '').lower()
+            keyword = alias_row.get("keyword", "").lower()
+            alias = alias_row.get("alias", "").lower()
 
             if word_lower == keyword or word_lower == alias:
-                matched_keywords_set.add(alias_row['keyword'])
+                matched_keywords_set.add(alias_row["keyword"])
                 if word not in matches_by_word:
                     matches_by_word[word] = []
-                if alias_row['keyword'] not in matches_by_word[word]:
-                    matches_by_word[word].append(alias_row['keyword'])
+                if alias_row["keyword"] not in matches_by_word[word]:
+                    matches_by_word[word].append(alias_row["keyword"])
 
         # Check against all keywords list
         for kw in all_keywords:
@@ -202,7 +210,8 @@ def check_words_against_aliases_and_database(words: List[str]) -> Dict[str, Any]
             results = keyword_search(keyword_original, limit=10)
         except Exception as e:
             logger.error(
-                f"[Deep Search Verification] Error searching for '{keyword_original}': {e}")
+                f"[Deep Search Verification] Error searching for '{keyword_original}': {e}"
+            )
             results = None
 
         if results and len(results) > 0:
@@ -210,10 +219,10 @@ def check_words_against_aliases_and_database(words: List[str]) -> Dict[str, Any]
             # Check if keyword appears in at least one result's content
             keyword_found = False
             for result in results:
-                content = result.get('content', '').lower()
+                content = result.get("content", "").lower()
                 # Check for exact word match (whole word, case-insensitive)
                 # Use word boundary to match whole words only
-                pattern = r'\b' + re.escape(keyword_lower) + r'\b'
+                pattern = r"\b" + re.escape(keyword_lower) + r"\b"
                 if re.search(pattern, content):
                     keyword_found = True
                     break
@@ -229,14 +238,15 @@ def check_words_against_aliases_and_database(words: List[str]) -> Dict[str, Any]
         if alias_matches:
             # This is an alias - check if base keyword exists
             for match in alias_matches:
-                base_keyword = match.get('keyword', '').strip()
+                base_keyword = match.get("keyword", "").strip()
                 if base_keyword:
                     # Verify base keyword exists in database
                     try:
                         base_results = keyword_search(base_keyword, limit=10)
                     except Exception as e:
                         logger.error(
-                            f"[Deep Search Verification] Error searching for base keyword '{base_keyword}': {e}")
+                            f"[Deep Search Verification] Error searching for base keyword '{base_keyword}': {e}"
+                        )
                         base_results = None
 
                     if base_results and len(base_results) > 0:
@@ -244,9 +254,9 @@ def check_words_against_aliases_and_database(words: List[str]) -> Dict[str, Any]
                         base_keyword_lower = base_keyword.lower()
                         base_found = False
                         for result in base_results:
-                            content = result.get('content', '').lower()
-                            pattern = r'\b' + \
-                                re.escape(base_keyword_lower) + r'\b'
+                            content = result.get("content", "").lower()
+                            pattern = r"\b" + \
+                                re.escape(base_keyword_lower) + r"\b"
                             if re.search(pattern, content):
                                 base_found = True
                                 break
@@ -273,7 +283,7 @@ def check_words_against_aliases_and_database(words: List[str]) -> Dict[str, Any]
                 alias_matches = find_keyword_by_alias(kw.lower())
                 if alias_matches:
                     for match in alias_matches:
-                        base_keyword = match.get('keyword', '')
+                        base_keyword = match.get("keyword", "")
                         if base_keyword in verified_keywords and base_keyword not in verified_list:
                             verified_list.append(base_keyword)
 
@@ -283,8 +293,8 @@ def check_words_against_aliases_and_database(words: List[str]) -> Dict[str, Any]
             verified_matches_by_word[word] = verified_list
 
     return {
-        'matched_keywords': sorted(verified_keywords),
-        'matches_by_word': verified_matches_by_word
+        "matched_keywords": sorted(verified_keywords),
+        "matches_by_word": verified_matches_by_word,
     }
 
 
@@ -312,12 +322,12 @@ def deep_search_keyword(word: str) -> Dict[str, Any]:
 
     if not word or not word.strip():
         return {
-            'detected_language': 'en',
-            'translation': '',
-            'all_words': [],
-            'matched_keywords': [],
-            'matches_by_word': {},
-            'progress_messages': []
+            "detected_language": "en",
+            "translation": "",
+            "all_words": [],
+            "matched_keywords": [],
+            "matches_by_word": {},
+            "progress_messages": [],
         }
 
     word = word.strip()
@@ -331,15 +341,15 @@ def deep_search_keyword(word: str) -> Dict[str, Any]:
     llm_result = generate_translation_and_synonyms(
         word, detected_lang, retry=False)
 
-    translation = llm_result.get('translation', '')
-    synonyms_en = llm_result.get('synonyms_en', [])
-    synonyms_vi = llm_result.get('synonyms_vi', [])
+    translation = llm_result.get("translation", "")
+    synonyms_en = llm_result.get("synonyms_en", [])
+    synonyms_vi = llm_result.get("synonyms_vi", [])
 
     # Build list of 6 words: 3 EN + 3 VI
     all_words = []
 
     # Add original word
-    if detected_lang == 'en':
+    if detected_lang == "en":
         all_words.append(word)  # Original EN
         if translation:
             all_words.append(translation)  # Translated VI
@@ -349,7 +359,7 @@ def deep_search_keyword(word: str) -> Dict[str, Any]:
             all_words.append(translation)  # Translated EN
 
     # Add synonyms (up to 3 each)
-    if detected_lang == 'en':
+    if detected_lang == "en":
         all_words.extend(synonyms_en[:3])  # 3 EN synonyms
         all_words.extend(synonyms_vi[:3])  # 3 VI synonyms
     else:
@@ -366,28 +376,30 @@ def deep_search_keyword(word: str) -> Dict[str, Any]:
 
     # Step 4: If no verified keywords found, retry with different synonyms
     retry_performed = False
-    if not check_result['matched_keywords']:
+    if not check_result["matched_keywords"]:
         # Log retry attempt
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info(
-            f"Deep search: No matches found for '{word}', retrying with different synonyms...")
+            f"Deep search: No matches found for '{word}', retrying with different synonyms..."
+        )
 
         # Retry with different set of synonyms
         retry_performed = True
         llm_result_retry = generate_translation_and_synonyms(
             word, detected_lang, retry=True)
 
-        translation_retry = llm_result_retry.get('translation', '')
-        synonyms_en_retry = llm_result_retry.get('synonyms_en', [])
-        synonyms_vi_retry = llm_result_retry.get('synonyms_vi', [])
+        translation_retry = llm_result_retry.get("translation", "")
+        synonyms_en_retry = llm_result_retry.get("synonyms_en", [])
+        synonyms_vi_retry = llm_result_retry.get("synonyms_vi", [])
 
         # Build new list of exactly 6 words: 3 EN + 3 VI (different from first attempt)
         # Always ensure we have 3 EN and 3 VI words, regardless of source language
         en_words = []
         vi_words = []
 
-        if detected_lang == 'en':
+        if detected_lang == "en":
             # Source is EN: get 3 EN synonyms + 3 VI words (translation + 2 VI synonyms)
             en_words = synonyms_en_retry[:3]
             if translation_retry:
@@ -409,7 +421,7 @@ def deep_search_keyword(word: str) -> Dict[str, Any]:
             vi_words.append(synonyms_vi_retry[len(vi_words)])
 
         # Combine: exactly 3 EN + 3 VI
-        all_words_retry = (en_words[:3] + vi_words[:3])
+        all_words_retry = en_words[:3] + vi_words[:3]
 
         # Remove duplicates and empty strings
         all_words_retry = [w.strip()
@@ -422,23 +434,23 @@ def deep_search_keyword(word: str) -> Dict[str, Any]:
             all_words_retry)
 
         # Use retry results if they found matches
-        if check_result_retry['matched_keywords']:
+        if check_result_retry["matched_keywords"]:
             return {
-                'detected_language': detected_lang,
-                'translation': translation_retry,
-                'all_words': all_words_retry,
-                'matched_keywords': check_result_retry['matched_keywords'],
-                'matches_by_word': check_result_retry['matches_by_word'],
-                'retry_performed': True,
-                'progress_messages': progress_messages
+                "detected_language": detected_lang,
+                "translation": translation_retry,
+                "all_words": all_words_retry,
+                "matched_keywords": check_result_retry["matched_keywords"],
+                "matches_by_word": check_result_retry["matches_by_word"],
+                "retry_performed": True,
+                "progress_messages": progress_messages,
             }
 
     return {
-        'detected_language': detected_lang,
-        'translation': translation,
-        'all_words': all_words,
-        'matched_keywords': check_result['matched_keywords'],
-        'matches_by_word': check_result['matches_by_word'],
-        'retry_performed': retry_performed,
-        'progress_messages': progress_messages
+        "detected_language": detected_lang,
+        "translation": translation,
+        "all_words": all_words,
+        "matched_keywords": check_result["matched_keywords"],
+        "matches_by_word": check_result["matches_by_word"],
+        "retry_performed": retry_performed,
+        "progress_messages": progress_messages,
     }

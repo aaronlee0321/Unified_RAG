@@ -59,4 +59,3 @@ async def generate_todo_list(requirements_json: Dict[str, Any]) -> List[Dict[str
         if isinstance(item, dict):
             cleaned.append(item)
     return cleaned
-

@@ -2,14 +2,16 @@
 Document Explainer service - generates detailed explanations from keyword queries.
 Uses section-based chunk retrieval with sequential LLM processing for comprehensive results.
 """
-from typing import List, Dict, Optional, Any, Tuple
+
 import re
 import time
-from backend.storage.supabase_client import get_supabase_client
-from backend.storage.keyword_storage import list_keyword_documents
-from backend.services.search_service import keyword_search
-from backend.services.llm_provider import SimpleLLMProvider
+from typing import Any, Dict, List, Optional
+
 from backend.services.hyde_service import hyde_expand_query
+from backend.services.llm_provider import SimpleLLMProvider
+from backend.services.search_service import keyword_search
+from backend.storage.keyword_storage import list_keyword_documents
+from backend.storage.supabase_client import get_supabase_client
 
 
 def detect_query_language(text: str) -> str:
@@ -25,13 +27,35 @@ def detect_query_language(text: str) -> str:
     text_lower = text.lower()
 
     # Vietnamese characters (accented letters)
-    vietnamese_chars = 'àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ'
+    vietnamese_chars = "àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ"
 
     # Common Vietnamese words
     vietnamese_words = [
-        'là', 'của', 'và', 'với', 'trong', 'cho', 'được', 'có', 'không', 'một',
-        'các', 'này', 'đó', 'như', 'theo', 'từ', 'về', 'đến', 'nếu', 'khi',
-        'thiết kế', 'mục đích', 'tương tác', 'thành phần', 'chức năng'
+        "là",
+        "của",
+        "và",
+        "với",
+        "trong",
+        "cho",
+        "được",
+        "có",
+        "không",
+        "một",
+        "các",
+        "này",
+        "đó",
+        "như",
+        "theo",
+        "từ",
+        "về",
+        "đến",
+        "nếu",
+        "khi",
+        "thiết kế",
+        "mục đích",
+        "tương tác",
+        "thành phần",
+        "chức năng",
     ]
 
     # Check for Vietnamese characters
@@ -49,10 +73,10 @@ def detect_query_language(text: str) -> str:
 
     # If there are clear Vietnamese indicators, return Vietnamese
     if vietnamese_score >= 2:
-        return 'vietnamese'
+        return "vietnamese"
 
     # Default to English
-    return 'english'
+    return "english"
 
 
 def get_all_chunks_from_section(doc_id: str, section_heading: str) -> List[Dict[str, Any]]:
@@ -69,13 +93,12 @@ def get_all_chunks_from_section(doc_id: str, section_heading: str) -> List[Dict[
     """
     client = get_supabase_client()
 
-    query = client.table('keyword_chunks').select(
-        '*').eq('doc_id', doc_id).order('chunk_index')
+    query = client.table("keyword_chunks").select("*").eq("doc_id", doc_id).order("chunk_index")
 
     if section_heading:
-        query = query.eq('section_heading', section_heading)
+        query = query.eq("section_heading", section_heading)
     else:
-        query = query.is_('section_heading', 'null')
+        query = query.is_("section_heading", "null")
 
     result = query.execute()
     return result.data if result.data else []
@@ -99,7 +122,7 @@ def _add_citation_to_text(text: str, citation_number: int) -> str:
     citation_html = f'<span class="citation-marker" data-citation-number="{citation_number}">{citation_number}</span>'
 
     # Split text into paragraphs (double newline)
-    paragraphs = text.split('\n\n')
+    paragraphs = text.split("\n\n")
     cited_paragraphs = []
 
     for para in paragraphs:
@@ -111,7 +134,7 @@ def _add_citation_to_text(text: str, citation_number: int) -> str:
         para = para.rstrip()
         cited_paragraphs.append(para + f" {citation_html}")
 
-    return '\n\n'.join(cited_paragraphs)
+    return "\n\n".join(cited_paragraphs)
 
 
 def _filter_missing_info_statements(text: str) -> str:
@@ -129,24 +152,24 @@ def _filter_missing_info_statements(text: str) -> str:
     if not text:
         return text
 
-    lines = text.split('\n')
+    lines = text.split("\n")
     filtered_lines = []
 
     # Patterns to match statements about missing information
     missing_info_patterns = [
-        r'the document does not specify',
-        r'the document does not provide',
-        r'the document does not contain',
-        r'this chunk does not contain',
-        r'no information.*provided',
-        r'no information.*specified',
-        r'information.*not.*available',
-        r'information.*not.*specified',
-        r'information.*not.*provided',
-        r'the document.*does not.*mention',
-        r'there is no information',
-        r'does not provide.*information',
-        r'does not specify.*information',
+        r"the document does not specify",
+        r"the document does not provide",
+        r"the document does not contain",
+        r"this chunk does not contain",
+        r"no information.*provided",
+        r"no information.*specified",
+        r"information.*not.*available",
+        r"information.*not.*specified",
+        r"information.*not.*provided",
+        r"the document.*does not.*mention",
+        r"there is no information",
+        r"does not provide.*information",
+        r"does not specify.*information",
     ]
 
     current_section = []
@@ -155,22 +178,27 @@ def _filter_missing_info_statements(text: str) -> str:
         line_lower = line.lower().strip()
 
         # Check if this line is a section header (starts with number)
-        is_section_header = re.match(r'^\d+\.', line.strip())
+        is_section_header = re.match(r"^\d+\.", line.strip())
 
         # Check if line contains missing information statements
-        contains_missing_info = any(re.search(pattern, line_lower)
-                                    for pattern in missing_info_patterns) if line_lower else False
+        contains_missing_info = (
+            any(re.search(pattern, line_lower) for pattern in missing_info_patterns)
+            if line_lower
+            else False
+        )
 
         if is_section_header:
             # Process previous section: check if it has real content
             if current_section:
-                section_text = '\n'.join(current_section).lower()
+                section_text = "\n".join(current_section).lower()
                 # Check if section has any non-missing-info content
-                section_lines = section_text.split('\n')
+                section_lines = section_text.split("\n")
                 has_real_content = False
                 for sec_line in section_lines:
-                    if sec_line.strip() and not re.match(r'^\d+\.', sec_line.strip()):
-                        if not any(re.search(pattern, sec_line) for pattern in missing_info_patterns):
+                    if sec_line.strip() and not re.match(r"^\d+\.", sec_line.strip()):
+                        if not any(
+                            re.search(pattern, sec_line) for pattern in missing_info_patterns
+                        ):
                             has_real_content = True
                             break
 
@@ -180,15 +208,17 @@ def _filter_missing_info_statements(text: str) -> str:
                     filtered_section = []
                     for sec_line in current_section:
                         sec_line_lower = sec_line.lower().strip()
-                        if not sec_line_lower or re.match(r'^\d+\.', sec_line.strip()):
+                        if not sec_line_lower or re.match(r"^\d+\.", sec_line.strip()):
                             filtered_section.append(sec_line)
-                        elif not any(re.search(pattern, sec_line_lower) for pattern in missing_info_patterns):
+                        elif not any(
+                            re.search(pattern, sec_line_lower) for pattern in missing_info_patterns
+                        ):
                             filtered_section.append(sec_line)
 
                     if filtered_section:
                         filtered_lines.extend(filtered_section)
                         # Add blank line between sections
-                        filtered_lines.append('')
+                        filtered_lines.append("")
 
             # Start new section
             current_section = [line]
@@ -204,11 +234,11 @@ def _filter_missing_info_statements(text: str) -> str:
 
     # Process last section
     if current_section:
-        section_text = '\n'.join(current_section).lower()
-        section_lines = section_text.split('\n')
+        section_text = "\n".join(current_section).lower()
+        section_lines = section_text.split("\n")
         has_real_content = False
         for sec_line in section_lines:
-            if sec_line.strip() and not re.match(r'^\d+\.', sec_line.strip()):
+            if sec_line.strip() and not re.match(r"^\d+\.", sec_line.strip()):
                 if not any(re.search(pattern, sec_line) for pattern in missing_info_patterns):
                     has_real_content = True
                     break
@@ -217,17 +247,19 @@ def _filter_missing_info_statements(text: str) -> str:
             filtered_section = []
             for sec_line in current_section:
                 sec_line_lower = sec_line.lower().strip()
-                if not sec_line_lower or re.match(r'^\d+\.', sec_line.strip()):
+                if not sec_line_lower or re.match(r"^\d+\.", sec_line.strip()):
                     filtered_section.append(sec_line)
-                elif not any(re.search(pattern, sec_line_lower) for pattern in missing_info_patterns):
+                elif not any(
+                    re.search(pattern, sec_line_lower) for pattern in missing_info_patterns
+                ):
                     filtered_section.append(sec_line)
 
             if filtered_section:
                 filtered_lines.extend(filtered_section)
 
     # Join and clean up multiple blank lines
-    result = '\n'.join(filtered_lines)
-    result = re.sub(r'\n{3,}', '\n\n', result)  # Replace 3+ newlines with 2
+    result = "\n".join(filtered_lines)
+    result = re.sub(r"\n{3,}", "\n\n", result)  # Replace 3+ newlines with 2
     result = result.strip()
 
     return result
@@ -302,234 +334,298 @@ def _explain_single_section(
 
         if not section_chunks:
             return {
-                'explanation': None,
-                'source_chunks': [],
-                'citations': {},
-                'error': f'No chunks found for section: {section_heading or "No section"}'
+                "explanation": None,
+                "source_chunks": [],
+                "citations": {},
+                "error": f"No chunks found for section: {section_heading or 'No section'}",
             }
 
         # Get keyword-matched chunks for relevance scoring
         # Search with all keywords and combine results (take max relevance for each chunk)
         relevance_map = {}
         keywords_to_search = all_keywords if all_keywords and len(all_keywords) > 0 else [keyword]
-        
+
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("=" * 100)
-        logger.info(f"[EXPLAIN SINGLE SECTION] ===== KEYWORD SEARCH DEBUG =====")
+        logger.info("[EXPLAIN SINGLE SECTION] ===== KEYWORD SEARCH DEBUG =====")
         logger.info(f"[EXPLAIN SINGLE SECTION] doc_id={doc_id}, section={section_heading}")
         logger.info(f"[EXPLAIN SINGLE SECTION] Primary keyword: '{keyword}'")
         logger.info(f"[EXPLAIN SINGLE SECTION] All keywords to search: {keywords_to_search}")
-        logger.info(f"[EXPLAIN SINGLE SECTION] HYDE queries available: {hyde_queries if hyde_queries else 'None'}")
+        logger.info(
+            f"[EXPLAIN SINGLE SECTION] HYDE queries available: {hyde_queries if hyde_queries else 'None'}"
+        )
         logger.info("=" * 100)
-        
+
         keyword_results_summary = {}  # Track results per keyword for debugging
-        
+
         for search_keyword in keywords_to_search:
             logger.info("-" * 100)
             logger.info(f"[EXPLAIN SINGLE SECTION] Processing keyword: '{search_keyword}'")
-            
+
             # Use HYDE-expanded query if available, otherwise use original keyword
             if hyde_queries and search_keyword in hyde_queries:
                 search_query = hyde_queries[search_keyword]
-                logger.info(f"[EXPLAIN SINGLE SECTION] Using HYDE-expanded query for '{search_keyword}': '{search_query}'")
+                logger.info(
+                    f"[EXPLAIN SINGLE SECTION] Using HYDE-expanded query for '{search_keyword}': '{search_query}'"
+                )
             else:
                 # Fallback: use primary HYDE query for primary keyword, direct search for others
-                search_query = hyde_query if search_keyword.strip() == keyword.strip() else search_keyword.strip()
-                logger.info(f"[EXPLAIN SINGLE SECTION] Using query for '{search_keyword}': '{search_query}' (no HYDE expansion available)")
-            
-            logger.info(f"[EXPLAIN SINGLE SECTION] Calling keyword_search with query='{search_query}', doc_id_filter='{doc_id}', limit=20")
-            matched_chunks = keyword_search(
-                search_query, limit=20, doc_id_filter=doc_id)
-            
-            logger.info(f"[EXPLAIN SINGLE SECTION] keyword_search returned {len(matched_chunks)} total chunks for query '{search_query}'")
-            
+                search_query = (
+                    hyde_query
+                    if search_keyword.strip() == keyword.strip()
+                    else search_keyword.strip()
+                )
+                logger.info(
+                    f"[EXPLAIN SINGLE SECTION] Using query for '{search_keyword}': '{search_query}' (no HYDE expansion available)"
+                )
+
+            logger.info(
+                f"[EXPLAIN SINGLE SECTION] Calling keyword_search with query='{search_query}', doc_id_filter='{doc_id}', limit=20"
+            )
+            matched_chunks = keyword_search(search_query, limit=20, doc_id_filter=doc_id)
+
+            logger.info(
+                f"[EXPLAIN SINGLE SECTION] keyword_search returned {len(matched_chunks)} total chunks for query '{search_query}'"
+            )
+
             # CRITICAL DEBUG: Log if no results or all relevance is 0.0
             if len(matched_chunks) == 0:
-                logger.error(f"[EXPLAIN SINGLE SECTION] ⚠️ NO RESULTS for keyword '{search_keyword}' (query: '{search_query}')")
+                logger.error(
+                    f"[EXPLAIN SINGLE SECTION] ⚠️ NO RESULTS for keyword '{search_keyword}' (query: '{search_query}')"
+                )
             else:
-                relevances = [c.get('relevance', 0.0) for c in matched_chunks if c.get('relevance') is not None]
+                relevances = [
+                    c.get("relevance", 0.0)
+                    for c in matched_chunks
+                    if c.get("relevance") is not None
+                ]
                 if relevances:
                     max_rel = max(relevances)
                     count_above_zero = sum(1 for r in relevances if r > 0.0)
-                    logger.info(f"[EXPLAIN SINGLE SECTION] Relevance stats for '{search_keyword}': max={max_rel:.4f}, count>0={count_above_zero}/{len(relevances)}")
+                    logger.info(
+                        f"[EXPLAIN SINGLE SECTION] Relevance stats for '{search_keyword}': max={max_rel:.4f}, count>0={count_above_zero}/{len(relevances)}"
+                    )
                     if max_rel == 0.0:
-                        logger.error(f"[EXPLAIN SINGLE SECTION] ⚠️ ALL RELEVANCE SCORES ARE 0.0 for keyword '{search_keyword}' (query: '{search_query}')")
-                        logger.error(f"[EXPLAIN SINGLE SECTION] This suggests the keyword_search_documents RPC function found no matches")
+                        logger.error(
+                            f"[EXPLAIN SINGLE SECTION] ⚠️ ALL RELEVANCE SCORES ARE 0.0 for keyword '{search_keyword}' (query: '{search_query}')"
+                        )
+                        logger.error(
+                            "[EXPLAIN SINGLE SECTION] This suggests the keyword_search_documents RPC function found no matches"
+                        )
                 else:
-                    logger.error(f"[EXPLAIN SINGLE SECTION] ⚠️ NO RELEVANCE SCORES in results for keyword '{search_keyword}'")
-            
+                    logger.error(
+                        f"[EXPLAIN SINGLE SECTION] ⚠️ NO RELEVANCE SCORES in results for keyword '{search_keyword}'"
+                    )
+
             # Log relevance scores for debugging
             if matched_chunks:
                 logger.info(f"[EXPLAIN SINGLE SECTION] Relevance scores for '{search_query}':")
                 for idx, c in enumerate(matched_chunks[:5]):  # Show first 5
-                    chunk_id = c.get('chunk_id', 'N/A')
-                    relevance = c.get('relevance', 0.0)
-                    section = c.get('section_heading', 'N/A')
-                    logger.info(f"  [{idx+1}] chunk_id={chunk_id}, relevance={relevance}, section={section}")
-            
+                    chunk_id = c.get("chunk_id", "N/A")
+                    relevance = c.get("relevance", 0.0)
+                    section = c.get("section_heading", "N/A")
+                    logger.info(
+                        f"  [{idx + 1}] chunk_id={chunk_id}, relevance={relevance}, section={section}"
+                    )
+
             matched_in_section = [
-                c for c in matched_chunks
-                if c.get('section_heading') == section_heading or
-                (section_heading is None and c.get('section_heading') is None)
+                c
+                for c in matched_chunks
+                if c.get("section_heading") == section_heading
+                or (section_heading is None and c.get("section_heading") is None)
             ]
-            
-            logger.info(f"[EXPLAIN SINGLE SECTION] After filtering by section '{section_heading}': {len(matched_in_section)} chunks match")
-            
+
+            logger.info(
+                f"[EXPLAIN SINGLE SECTION] After filtering by section '{section_heading}': {len(matched_in_section)} chunks match"
+            )
+
             # Track results for this keyword
             keyword_results_summary[search_keyword] = {
-                'total_chunks': len(matched_chunks),
-                'matched_in_section': len(matched_in_section),
-                'relevance_scores': [c.get('relevance', 0.0) for c in matched_in_section[:10]]
+                "total_chunks": len(matched_chunks),
+                "matched_in_section": len(matched_in_section),
+                "relevance_scores": [c.get("relevance", 0.0) for c in matched_in_section[:10]],
             }
-            
+
             # Update relevance map with max relevance for each chunk
             chunks_updated = 0
             for c in matched_in_section:
-                chunk_id = c.get('chunk_id')
+                chunk_id = c.get("chunk_id")
                 if chunk_id:
                     current_relevance = relevance_map.get(chunk_id, 0.0)
-                    new_relevance = c.get('relevance', 0.0)
+                    new_relevance = c.get("relevance", 0.0)
                     old_relevance = current_relevance
                     # Take maximum relevance across all keyword searches
                     relevance_map[chunk_id] = max(current_relevance, new_relevance)
                     if relevance_map[chunk_id] != old_relevance:
                         chunks_updated += 1
-                        logger.info(f"[EXPLAIN SINGLE SECTION] Updated relevance for chunk_id={chunk_id}: {old_relevance} -> {relevance_map[chunk_id]} (from keyword '{search_keyword}')")
-            
-            logger.info(f"[EXPLAIN SINGLE SECTION] Updated {chunks_updated} chunk relevance scores from keyword '{search_keyword}'")
-        
+                        logger.info(
+                            f"[EXPLAIN SINGLE SECTION] Updated relevance for chunk_id={chunk_id}: {old_relevance} -> {relevance_map[chunk_id]} (from keyword '{search_keyword}')"
+                        )
+
+            logger.info(
+                f"[EXPLAIN SINGLE SECTION] Updated {chunks_updated} chunk relevance scores from keyword '{search_keyword}'"
+            )
+
         logger.info("-" * 100)
-        logger.info(f"[EXPLAIN SINGLE SECTION] ===== RELEVANCE MAP SUMMARY =====")
+        logger.info("[EXPLAIN SINGLE SECTION] ===== RELEVANCE MAP SUMMARY =====")
         logger.info(f"[EXPLAIN SINGLE SECTION] Total chunks in relevance_map: {len(relevance_map)}")
         if relevance_map:
             sorted_relevance = sorted(relevance_map.items(), key=lambda x: x[1], reverse=True)
-            logger.info(f"[EXPLAIN SINGLE SECTION] Top 10 chunks by relevance:")
+            logger.info("[EXPLAIN SINGLE SECTION] Top 10 chunks by relevance:")
             for idx, (chunk_id, rel) in enumerate(sorted_relevance[:10]):
-                logger.info(f"  [{idx+1}] chunk_id={chunk_id}, relevance={rel}")
-        logger.info(f"[EXPLAIN SINGLE SECTION] Keyword results summary:")
+                logger.info(f"  [{idx + 1}] chunk_id={chunk_id}, relevance={rel}")
+        logger.info("[EXPLAIN SINGLE SECTION] Keyword results summary:")
         for kw, summary in keyword_results_summary.items():
-            logger.info(f"  '{kw}': {summary['matched_in_section']} chunks in section, relevance range: {min(summary['relevance_scores']) if summary['relevance_scores'] else 0.0:.4f} - {max(summary['relevance_scores']) if summary['relevance_scores'] else 0.0:.4f}")
+            logger.info(
+                f"  '{kw}': {summary['matched_in_section']} chunks in section, relevance range: {min(summary['relevance_scores']) if summary['relevance_scores'] else 0.0:.4f} - {max(summary['relevance_scores']) if summary['relevance_scores'] else 0.0:.4f}"
+            )
         logger.info("=" * 100)
 
         # Combine section chunks with relevance scores
         chunks_with_relevance = []
         for chunk in section_chunks:
-            chunk_id = chunk.get('chunk_id')
+            chunk_id = chunk.get("chunk_id")
             if chunk_id:
                 chunk_with_relevance = dict(chunk)
-                chunk_with_relevance['relevance'] = relevance_map.get(
-                    chunk_id, 0.0)
-                chunk_with_relevance['doc_id'] = doc_id
-                if 'content' not in chunk_with_relevance or chunk_with_relevance.get('content') is None:
-                    chunk_with_relevance['content'] = ''
+                chunk_with_relevance["relevance"] = relevance_map.get(chunk_id, 0.0)
+                chunk_with_relevance["doc_id"] = doc_id
+                if (
+                    "content" not in chunk_with_relevance
+                    or chunk_with_relevance.get("content") is None
+                ):
+                    chunk_with_relevance["content"] = ""
                 chunks_with_relevance.append(chunk_with_relevance)
 
         # Sort by chunk_index to maintain order
-        chunks_with_relevance.sort(key=lambda x: x.get('chunk_index', 0))
+        chunks_with_relevance.sort(key=lambda x: x.get("chunk_index", 0))
 
         # Filter to only relevant chunks (relevance > 0.0)
-        relevant_chunks = [
-            c for c in chunks_with_relevance if c.get('relevance', 0.0) > 0.0]
+        relevant_chunks = [c for c in chunks_with_relevance if c.get("relevance", 0.0) > 0.0]
 
-        logger.info(f"[EXPLAIN SINGLE SECTION] ===== CHUNK SELECTION =====")
+        logger.info("[EXPLAIN SINGLE SECTION] ===== CHUNK SELECTION =====")
         logger.info(f"[EXPLAIN SINGLE SECTION] Total chunks in section: {len(section_chunks)}")
         logger.info(f"[EXPLAIN SINGLE SECTION] Chunks with relevance > 0.0: {len(relevant_chunks)}")
-        
+
         # CRITICAL DEBUG: Show why no chunks were found
         if len(relevant_chunks) == 0:
             logger.error("=" * 100)
-            logger.error(f"[EXPLAIN SINGLE SECTION] ⚠️⚠️⚠️ CRITICAL: NO CHUNKS WITH RELEVANCE > 0.0 ⚠️⚠️⚠️")
+            logger.error(
+                "[EXPLAIN SINGLE SECTION] ⚠️⚠️⚠️ CRITICAL: NO CHUNKS WITH RELEVANCE > 0.0 ⚠️⚠️⚠️"
+            )
             logger.error(f"[EXPLAIN SINGLE SECTION] Section: {section_heading}, doc_id: {doc_id}")
             logger.error(f"[EXPLAIN SINGLE SECTION] Keywords searched: {keywords_to_search}")
             logger.error(f"[EXPLAIN SINGLE SECTION] Relevance map size: {len(relevance_map)}")
             if relevance_map:
-                logger.error(f"[EXPLAIN SINGLE SECTION] Relevance map values: {list(relevance_map.values())[:10]}")
-                logger.error(f"[EXPLAIN SINGLE SECTION] Max relevance in map: {max(relevance_map.values()) if relevance_map.values() else 0.0}")
+                logger.error(
+                    f"[EXPLAIN SINGLE SECTION] Relevance map values: {list(relevance_map.values())[:10]}"
+                )
+                logger.error(
+                    f"[EXPLAIN SINGLE SECTION] Max relevance in map: {max(relevance_map.values()) if relevance_map.values() else 0.0}"
+                )
             else:
-                logger.error(f"[EXPLAIN SINGLE SECTION] Relevance map is EMPTY - keyword_search returned no matches!")
-            logger.error(f"[EXPLAIN SINGLE SECTION] This means keyword_search_documents RPC found NO matches for any keyword")
+                logger.error(
+                    "[EXPLAIN SINGLE SECTION] Relevance map is EMPTY - keyword_search returned no matches!"
+                )
+            logger.error(
+                "[EXPLAIN SINGLE SECTION] This means keyword_search_documents RPC found NO matches for any keyword"
+            )
             logger.error("=" * 100)
-        
+
         if relevant_chunks:
             # Sort by relevance (descending), then by chunk_index
-            relevant_chunks.sort(
-                key=lambda x: (-x.get('relevance', 0.0), x.get('chunk_index', 0)))
+            relevant_chunks.sort(key=lambda x: (-x.get("relevance", 0.0), x.get("chunk_index", 0)))
             # Limit chunks per section to avoid token overflow (max 10 chunks per section)
             selected_chunks = relevant_chunks[:10]
-            logger.info(f"[EXPLAIN SINGLE SECTION] Selected {len(selected_chunks)} chunks (from {len(relevant_chunks)} relevant chunks)")
-            logger.info(f"[EXPLAIN SINGLE SECTION] Selected chunk relevance scores: {[c.get('relevance', 0.0) for c in selected_chunks]}")
+            logger.info(
+                f"[EXPLAIN SINGLE SECTION] Selected {len(selected_chunks)} chunks (from {len(relevant_chunks)} relevant chunks)"
+            )
+            logger.info(
+                f"[EXPLAIN SINGLE SECTION] Selected chunk relevance scores: {[c.get('relevance', 0.0) for c in selected_chunks]}"
+            )
         else:
             # Fallback: use first few chunks if no keyword matches
             selected_chunks = chunks_with_relevance[:5]
-            logger.warning(f"[EXPLAIN SINGLE SECTION] No relevant chunks found (relevance > 0.0), using fallback: {len(selected_chunks)} chunks")
-            logger.warning(f"[EXPLAIN SINGLE SECTION] Fallback chunks have relevance scores: {[c.get('relevance', 0.0) for c in selected_chunks]}")
-        
+            logger.warning(
+                f"[EXPLAIN SINGLE SECTION] No relevant chunks found (relevance > 0.0), using fallback: {len(selected_chunks)} chunks"
+            )
+            logger.warning(
+                f"[EXPLAIN SINGLE SECTION] Fallback chunks have relevance scores: {[c.get('relevance', 0.0) for c in selected_chunks]}"
+            )
+
         logger.info("=" * 100)
 
         if not selected_chunks:
             return {
-                'explanation': None,
-                'source_chunks': [],
-                'citations': {},
-                'error': f'No relevant chunks found for section: {section_heading or "No section"}'
+                "explanation": None,
+                "source_chunks": [],
+                "citations": {},
+                "error": f"No relevant chunks found for section: {section_heading or 'No section'}",
             }
 
         # Build prompt with chunk context
         # Sort chunks by chunk_id to match sidebar order (alphanumeric)
-        selected_chunks_sorted = sorted(
-            selected_chunks, key=lambda x: x.get('chunk_id', '') or '')
+        selected_chunks_sorted = sorted(selected_chunks, key=lambda x: x.get("chunk_id", "") or "")
 
         chunk_texts_with_sections = []
         citation_map = {}
 
         for chunk in selected_chunks_sorted:
-            if not chunk.get('doc_id') or chunk.get('content') is None:
+            if not chunk.get("doc_id") or chunk.get("content") is None:
                 continue
 
             doc_name = doc_name_map.get(doc_id, doc_id)
-            section_heading_val = chunk.get('section_heading')
-            chunk_id = chunk.get('chunk_id', '')
+            section_heading_val = chunk.get("section_heading")
+            chunk_id = chunk.get("chunk_id", "")
 
             # Store citation info (will be set by caller)
             citation_map[chunk_id] = {
-                'doc_id': doc_id,
-                'doc_name': doc_name,
-                'section_heading': section_heading_val,
-                'chunk_id': chunk_id
+                "doc_id": doc_id,
+                "doc_name": doc_name,
+                "section_heading": section_heading_val,
+                "chunk_id": chunk_id,
             }
 
-            section_info = f" [Section: {section_heading_val}]" if section_heading_val else " [No section]"
-            content = chunk.get('content', '') or ''
-
-            chunk_texts_with_sections.append(
-                f"[Chunk from {doc_name}{section_info}]\n{content}"
+            section_info = (
+                f" [Section: {section_heading_val}]" if section_heading_val else " [No section]"
             )
+            content = chunk.get("content", "") or ""
+
+            chunk_texts_with_sections.append(f"[Chunk from {doc_name}{section_info}]\n{content}")
 
         chunk_texts_enhanced = "\n\n".join(chunk_texts_with_sections)
 
         # Determine response language instruction
-        if detected_language == 'vietnamese':
+        if detected_language == "vietnamese":
             language_instruction = "IMPORTANT: Respond in Vietnamese (Tiếng Việt). Your entire answer must be in Vietnamese."
         else:
-            language_instruction = "IMPORTANT: Respond in English. Your entire answer must be in English."
+            language_instruction = (
+                "IMPORTANT: Respond in English. Your entire answer must be in English."
+            )
 
         # Build keyword list for prompt (primary + all additional keywords)
         # Collect all unique keywords (primary + additional)
         keyword_list = [keyword.strip()] if keyword and keyword.strip() else []
         if all_keywords:
             for kw in all_keywords:
-                if kw and kw.strip() and kw.strip() not in [k.strip().lower() for k in keyword_list]:
+                if (
+                    kw
+                    and kw.strip()
+                    and kw.strip() not in [k.strip().lower() for k in keyword_list]
+                ):
                     keyword_list.append(kw.strip())
-        
+
         # Create display string for prompt
         if len(keyword_list) > 1:
-            keyword_display = f"{keyword_list[0]} (or its translation: {', '.join(keyword_list[1:])})"
+            keyword_display = (
+                f"{keyword_list[0]} (or its translation: {', '.join(keyword_list[1:])})"
+            )
         elif len(keyword_list) == 1:
             keyword_display = keyword_list[0]
         else:
             keyword_display = keyword  # Fallback
-        
+
         # Build prompt (same format as before, but for single section)
         prompt = f"""Based on the following document chunks, provide a detailed explanation for: {keyword_display}
 
@@ -537,8 +633,8 @@ def _explain_single_section(
 
 FOCUS REQUIREMENT:
 - Focus ONLY on information directly related to: {keyword_display}
-- The keyword may appear in the document as: {', '.join(keyword_list)}
-- If a chunk does not contain information about any of these keywords ({', '.join(keyword_list)}), SKIP IT ENTIRELY. Do NOT include it in your response.
+- The keyword may appear in the document as: {", ".join(keyword_list)}
+- If a chunk does not contain information about any of these keywords ({", ".join(keyword_list)}), SKIP IT ENTIRELY. Do NOT include it in your response.
 - Do NOT explain chunks that are irrelevant to the keyword query.
 - Only include information that is directly relevant to explaining {keyword_display}.
 - Do NOT include any statements about missing information such as "The document does not specify this" or "The document does not provide information about X".
@@ -563,7 +659,7 @@ OUTPUT FORMAT REQUIREMENTS:
 - After the section title, add a blank line, then write a paragraph explaining that chunk's content.
 - Each section must be separated by a blank line.
 - Do NOT combine multiple chunks into one section.
-- Only explain chunks that contain information relevant to {keyword_display} (or any of its translations: {', '.join(keyword_list)}). If a chunk is irrelevant, SKIP IT COMPLETELY - do not include it in your response at all.
+- Only explain chunks that contain information relevant to {keyword_display} (or any of its translations: {", ".join(keyword_list)}). If a chunk is irrelevant, SKIP IT COMPLETELY - do not include it in your response at all.
 
 EXAMPLE OUTPUT FORMAT:
 1. Tank Stats
@@ -613,8 +709,7 @@ Chunks:
         try:
             provider = SimpleLLMProvider()
             llm_start_time = time.perf_counter()
-            explanation = provider.llm(
-                prompt, temperature=0.3, max_tokens=3000)
+            explanation = provider.llm(prompt, temperature=0.3, max_tokens=3000)
             llm_end_time = time.perf_counter()
             section_timing = round(llm_end_time - llm_start_time, 2)
 
@@ -626,6 +721,7 @@ Chunks:
             # This prevents valid explanations from being completely filtered out
             if not explanation or not explanation.strip():
                 import logging
+
                 logger = logging.getLogger(__name__)
                 logger.warning(
                     f"Filtering removed all content for section {section_heading} in {doc_id}. "
@@ -638,27 +734,27 @@ Chunks:
             section_label = f"{doc_name} → {section_heading or '(No section)'}"
 
             return {
-                'explanation': explanation,
-                'source_chunks': selected_chunks,
-                'citations': citation_map,
-                'section_timing': section_timing,
-                'section_label': section_label,
-                'error': None
+                "explanation": explanation,
+                "source_chunks": selected_chunks,
+                "citations": citation_map,
+                "section_timing": section_timing,
+                "section_label": section_label,
+                "error": None,
             }
         except Exception as e:
             return {
-                'explanation': None,
-                'source_chunks': selected_chunks,
-                'citations': citation_map,
-                'error': f'LLM error: {str(e)}'
+                "explanation": None,
+                "source_chunks": selected_chunks,
+                "citations": citation_map,
+                "error": f"LLM error: {str(e)}",
             }
 
     except Exception as e:
         return {
-            'explanation': None,
-            'source_chunks': [],
-            'citations': {},
-            'error': f'Error processing section: {str(e)}'
+            "explanation": None,
+            "source_chunks": [],
+            "citations": {},
+            "error": f"Error processing section: {str(e)}",
         }
 
 
@@ -689,12 +785,12 @@ def explain_keyword(
         all_keywords_to_expand = [keyword]
         if additional_keywords:
             all_keywords_to_expand.extend(additional_keywords)
-        
+
         # Expand all keywords with HYDE
         hyde_queries = {}  # Map original keyword -> expanded query
         hyde_timing = {}
         hyde_expansion_time = 0.0
-        
+
         if use_hyde:
             hyde_start_time = time.perf_counter()
             for kw in all_keywords_to_expand:
@@ -702,11 +798,11 @@ def explain_keyword(
                 hyde_queries[kw] = expanded
                 # Accumulate timing (use max or sum, here using sum for total time)
                 if timing:
-                    hyde_expansion_time += timing.get('total_time', 0.0)
+                    hyde_expansion_time += timing.get("total_time", 0.0)
             hyde_end_time = time.perf_counter()
             hyde_expansion_time = round(hyde_end_time - hyde_start_time, 2)
-            hyde_timing = {'total_time': hyde_expansion_time}
-        
+            hyde_timing = {"total_time": hyde_expansion_time}
+
         # Primary HYDE query (for backward compatibility and display)
         hyde_query = hyde_queries.get(keyword, keyword)
 
@@ -715,45 +811,42 @@ def explain_keyword(
         seen_sections = set()
 
         for item in selected_items:
-            doc_id = item['doc_id']
-            section_heading = item.get('section_heading')
+            doc_id = item["doc_id"]
+            section_heading = item.get("section_heading")
             section_key = (doc_id, section_heading)
 
             if section_key not in seen_sections:
-                unique_sections.append({
-                    'doc_id': doc_id,
-                    'section_heading': section_heading
-                })
+                unique_sections.append({"doc_id": doc_id, "section_heading": section_heading})
                 seen_sections.add(section_key)
 
         if not unique_sections:
             return {
-                'explanation': 'No sections selected.',
-                'source_chunks': [],
-                'hyde_query': hyde_query,
-                'language': 'english',
-                'error': None
+                "explanation": "No sections selected.",
+                "source_chunks": [],
+                "hyde_query": hyde_query,
+                "language": "english",
+                "error": None,
             }
 
         # Step 3: Get document name mapping for citations
         docs = list_keyword_documents()
         doc_name_map = {}
         for doc in docs:
-            doc_id = doc.get('doc_id')
+            doc_id = doc.get("doc_id")
             if not doc_id:
                 continue
-            name = doc.get('name', doc_id)
+            name = doc.get("name", doc_id)
             filename = name
-            if '\\' in filename or '/' in filename:
-                filename = filename.split('\\')[-1].split('/')[-1]
-            if filename.lower().endswith('.pdf'):
+            if "\\" in filename or "/" in filename:
+                filename = filename.split("\\")[-1].split("/")[-1]
+            if filename.lower().endswith(".pdf"):
                 filename = filename[:-4]
             doc_name_map[doc_id] = filename
 
         # Step 4: Detect or use provided language
-        if language and language in ['en', 'vn']:
+        if language and language in ["en", "vn"]:
             # Use provided language from toggle
-            detected_language = 'vietnamese' if language == 'vn' else 'english'
+            detected_language = "vietnamese" if language == "vn" else "english"
         else:
             # Auto-detect from keyword
             detected_language = detect_query_language(keyword)
@@ -762,17 +855,16 @@ def explain_keyword(
         # This ensures we process sections in sidebar order
         all_chunks_global = []
         for section in unique_sections:
-            doc_id = section['doc_id']
-            section_heading = section.get('section_heading')
-            section_chunks = get_all_chunks_from_section(
-                doc_id, section_heading)
+            doc_id = section["doc_id"]
+            section_heading = section.get("section_heading")
+            section_chunks = get_all_chunks_from_section(doc_id, section_heading)
             for chunk in section_chunks:
-                chunk['_doc_id'] = doc_id
-                chunk['_section_heading'] = section_heading
+                chunk["_doc_id"] = doc_id
+                chunk["_section_heading"] = section_heading
                 all_chunks_global.append(chunk)
 
         # Sort all chunks globally by chunk_id to match sidebar order
-        all_chunks_global.sort(key=lambda x: x.get('chunk_id', '') or '')
+        all_chunks_global.sort(key=lambda x: x.get("chunk_id", "") or "")
 
         # Step 6: Process each section sequentially, adding citations as we go
         section_results = []
@@ -785,22 +877,30 @@ def explain_keyword(
         # Group chunks by (doc_id, section_heading) to process sections
         chunks_by_section = {}
         for chunk in all_chunks_global:
-            doc_id = chunk.get('_doc_id')
-            section_heading = chunk.get('_section_heading')
+            doc_id = chunk.get("_doc_id")
+            section_heading = chunk.get("_section_heading")
             section_key = (doc_id, section_heading)
             if section_key not in chunks_by_section:
                 chunks_by_section[section_key] = []
             chunks_by_section[section_key].append(chunk)
 
         # Process sections in order (sorted by first chunk's chunk_id in each section)
-        sorted_sections = sorted(chunks_by_section.items(),
-                                 key=lambda x: x[1][0].get('chunk_id', '') or '' if x[1] else '')
+        sorted_sections = sorted(
+            chunks_by_section.items(),
+            key=lambda x: x[1][0].get("chunk_id", "") or "" if x[1] else "",
+        )
 
         # Collect all keywords to query (primary + additional)
         all_keywords = [keyword]
         if additional_keywords:
-            all_keywords.extend([kw for kw in additional_keywords if kw and kw.strip() and kw.strip() != keyword.strip()])
-        
+            all_keywords.extend(
+                [
+                    kw
+                    for kw in additional_keywords
+                    if kw and kw.strip() and kw.strip() != keyword.strip()
+                ]
+            )
+
         for (doc_id, section_heading), section_chunks in sorted_sections:
             # Process this section with all keywords
             result = _explain_single_section(
@@ -811,54 +911,58 @@ def explain_keyword(
                 doc_name_map=doc_name_map,
                 detected_language=detected_language,
                 all_keywords=all_keywords,
-                hyde_queries=hyde_queries  # Pass all HYDE-expanded queries
+                hyde_queries=hyde_queries,  # Pass all HYDE-expanded queries
             )
 
-            if result.get('error'):
+            if result.get("error"):
                 errors.append(
-                    f"{doc_name_map.get(doc_id, doc_id)} - {section_heading or 'No section'}: {result['error']}")
+                    f"{doc_name_map.get(doc_id, doc_id)} - {section_heading or 'No section'}: {result['error']}"
+                )
 
             # Check if explanation exists and is not empty/whitespace
-            explanation_text = result.get('explanation')
+            explanation_text = result.get("explanation")
             if explanation_text and explanation_text.strip():
                 # Add citation to this section's explanation
                 explanation_with_citation = _add_citation_to_text(
-                    explanation_text, citation_counter)
+                    explanation_text, citation_counter
+                )
 
                 # Build citation map for this section (use first chunk for citation info)
-                source_chunks = result.get('source_chunks', [])
+                source_chunks = result.get("source_chunks", [])
                 if source_chunks:
                     first_chunk = source_chunks[0]
                     all_citations[citation_counter] = {
-                        'doc_id': doc_id,
-                        'doc_name': doc_name_map.get(doc_id, doc_id),
-                        'section_heading': first_chunk.get('section_heading'),
-                        'chunk_id': first_chunk.get('chunk_id', '')
+                        "doc_id": doc_id,
+                        "doc_name": doc_name_map.get(doc_id, doc_id),
+                        "section_heading": first_chunk.get("section_heading"),
+                        "chunk_id": first_chunk.get("chunk_id", ""),
                     }
 
-                section_results.append({
-                    'doc_id': doc_id,
-                    'section_heading': section_heading,
-                    'explanation': explanation_with_citation,
-                    'source_chunks': source_chunks
-                })
+                section_results.append(
+                    {
+                        "doc_id": doc_id,
+                        "section_heading": section_heading,
+                        "explanation": explanation_with_citation,
+                        "source_chunks": source_chunks,
+                    }
+                )
 
                 # Increment citation counter for next LLM call
                 citation_counter += 1
 
             # Collect section timing if available
-            if result.get('section_timing') is not None and result.get('section_label'):
-                section_timings.append({
-                    'label': result['section_label'],
-                    'time': result['section_timing']
-                })
+            if result.get("section_timing") is not None and result.get("section_label"):
+                section_timings.append(
+                    {"label": result["section_label"], "time": result["section_timing"]}
+                )
 
             # Collect source chunks
-            all_source_chunks.extend(result.get('source_chunks', []))
+            all_source_chunks.extend(result.get("source_chunks", []))
 
         # Step 6: Combine all section explanations
         if not section_results:
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(
                 f"No explanations generated for keyword '{keyword}'. "
@@ -867,18 +971,18 @@ def explain_keyword(
                 f"Errors: {errors if errors else 'None'}"
             )
 
-            error_msg = 'No explanations generated. '
+            error_msg = "No explanations generated. "
             if errors:
-                error_msg += 'Errors: ' + '; '.join(errors)
+                error_msg += "Errors: " + "; ".join(errors)
             else:
-                error_msg += 'All generated explanations were filtered out or empty. This may indicate that the content does not match the keyword query.'
+                error_msg += "All generated explanations were filtered out or empty. This may indicate that the content does not match the keyword query."
 
             return {
-                'explanation': error_msg,
-                'source_chunks': all_source_chunks,
-                'hyde_query': hyde_query,
-                'language': detected_language,
-                'error': error_msg if errors else None
+                "explanation": error_msg,
+                "source_chunks": all_source_chunks,
+                "hyde_query": hyde_query,
+                "language": detected_language,
+                "error": error_msg if errors else None,
             }
 
         # Combine explanations: renumber sections sequentially
@@ -888,13 +992,13 @@ def explain_keyword(
         combined_parts = []
 
         for section_result in section_results:
-            explanation_text = section_result['explanation']
+            explanation_text = section_result["explanation"]
 
             # Pattern to match section headers: number followed by period and space
             # Example: "1. Section Title" or "2. Another Section"
-            pattern = r'^(\d+)\.\s+(.+)$'
+            pattern = r"^(\d+)\.\s+(.+)$"
 
-            lines = explanation_text.split('\n')
+            lines = explanation_text.split("\n")
             processed_lines = []
 
             for line in lines:
@@ -902,8 +1006,7 @@ def explain_keyword(
                 if match:
                     # This is a section header - renumber it
                     section_title = match.group(2)
-                    processed_lines.append(
-                        f"{section_number}. {section_title}")
+                    processed_lines.append(f"{section_number}. {section_title}")
                     section_number += 1
                 else:
                     # Regular content line - keep as is
@@ -911,10 +1014,10 @@ def explain_keyword(
 
             # Add this section's explanation to combined parts
             if processed_lines:
-                combined_parts.append('\n'.join(processed_lines))
+                combined_parts.append("\n".join(processed_lines))
 
         # Join all sections with double newlines
-        final_explanation = '\n\n'.join(combined_parts)
+        final_explanation = "\n\n".join(combined_parts)
 
         # Post-process: Remove statements about missing information from combined explanation
         final_explanation = _filter_missing_info_statements(final_explanation)
@@ -922,26 +1025,26 @@ def explain_keyword(
         formatting_time = round(formatting_end_time - formatting_start_time, 2)
 
         return {
-            'explanation': final_explanation,
-            'source_chunks': all_source_chunks,
-            'hyde_query': hyde_query,
-            'language': detected_language,
-            'hyde_timing': hyde_timing,
-            'chunks_used': len(all_source_chunks),
-            'citations': all_citations,
-            'error': '; '.join(errors) if errors else None,
-            'timing_metadata': {
-                'hyde_expansion_time': hyde_expansion_time,
-                'section_timings': section_timings,
-                'formatting_time': formatting_time
-            }
+            "explanation": final_explanation,
+            "source_chunks": all_source_chunks,
+            "hyde_query": hyde_query,
+            "language": detected_language,
+            "hyde_timing": hyde_timing,
+            "chunks_used": len(all_source_chunks),
+            "citations": all_citations,
+            "error": "; ".join(errors) if errors else None,
+            "timing_metadata": {
+                "hyde_expansion_time": hyde_expansion_time,
+                "section_timings": section_timings,
+                "formatting_time": formatting_time,
+            },
         }
 
     except Exception as e:
         return {
-            'explanation': None,
-            'source_chunks': [],
-            'hyde_query': keyword,
-            'language': 'english',
-            'error': f'Error generating explanation: {str(e)}'
+            "explanation": None,
+            "source_chunks": [],
+            "hyde_query": keyword,
+            "language": "english",
+            "error": f"Error generating explanation: {str(e)}",
         }

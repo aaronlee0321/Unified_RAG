@@ -8,20 +8,17 @@ to determine implementation status (implemented, partially_implemented, not_impl
 
 from __future__ import annotations
 
-# Standard library imports
 import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
-logger = logging.getLogger(__name__)
-
-# Project imports
 from gdd_rag_backbone.gdd.schemas import GddRequirement
 from gdd_rag_backbone.llm_providers import QwenProvider, make_llm_model_func
 from gdd_rag_backbone.rag_backend.chunk_qa import get_top_chunks, load_doc_chunks
 
+logger = logging.getLogger(__name__)
 DEFAULT_REPORT_DIR = Path("reports/coverage_checks")
 
 # In-memory cache for semantic results within a process.
@@ -54,7 +51,8 @@ def generate_code_queries(requirement: GddRequirement) -> List[str]:
 
 async def search_code_chunks(
     queries: Sequence[str],
-    code_index_id: str | Sequence[str],  # Support single or multiple code indices
+    # Support single or multiple code indices
+    code_index_id: str | Sequence[str],
     *,
     provider: Optional[QwenProvider] = None,
     top_k: int = 8,
@@ -63,7 +61,7 @@ async def search_code_chunks(
         return []
 
     active_provider = provider or QwenProvider()
-    
+
     # Normalize to list of code indices
     if isinstance(code_index_id, str):
         code_indices = [code_index_id]
@@ -80,7 +78,7 @@ async def search_code_chunks(
     # Run all queries in parallel instead of sequentially
     query_tasks = [_run_query(query) for query in queries]
     all_query_results = await asyncio.gather(*query_tasks)
-    
+
     # Merge results, keeping best score per chunk
     seen: Dict[str, Dict[str, Any]] = {}
     for query, chunks in zip(queries, all_query_results):
@@ -141,7 +139,8 @@ Return ONLY JSON:
     text = response.strip()
     if text.startswith("```"):
         lines = text.split("\n")
-        text = "\n".join(lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
+        text = "\n".join(
+            lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
 
     try:
         payload = json.loads(text)
@@ -161,7 +160,9 @@ Return ONLY JSON:
     return payload
 
 
-def fast_symbol_coverage(requirement: GddRequirement, symbol_index: Dict[str, list]) -> Dict[str, Any]:
+def fast_symbol_coverage(
+    requirement: GddRequirement, symbol_index: Dict[str, list]
+) -> Dict[str, Any]:
     """
     Cheap O(1) symbol lookup. Does NOT call LLM.
     requirement may optionally include:
@@ -224,7 +225,8 @@ def semantic_retrieve_candidates(
         return []
     try:
         return get_top_chunks(
-            [code_index_id] if isinstance(code_index_id, str) else code_index_id,
+            [code_index_id] if isinstance(
+                code_index_id, str) else code_index_id,
             query,
             provider=provider,
             top_k=top_k,
@@ -233,7 +235,9 @@ def semantic_retrieve_candidates(
         return []
 
 
-async def llm_semantic_judgement(requirement: GddRequirement, candidate: Dict[str, Any], llm_model, timeout: float = 25.0) -> Dict[str, Any]:
+async def llm_semantic_judgement(
+    requirement: GddRequirement, candidate: Dict[str, Any], llm_model, timeout: float = 25.0
+) -> Dict[str, Any]:
     """
     Use LLM to classify how well a code chunk implements the requirement.
     Reduced timeout from 30s to 25s to prevent hanging.
@@ -245,10 +249,10 @@ async def llm_semantic_judgement(requirement: GddRequirement, candidate: Dict[st
         "Keep reasoning to one short sentence."
     )
     # Truncate code content to prevent overly long prompts
-    code_content = candidate.get('content', '')
+    code_content = candidate.get("content", "")
     if len(code_content) > 2000:
         code_content = code_content[:2000] + "... [truncated]"
-    
+
     user_prompt = f"""
 Requirement:
 {requirement.description or requirement.title}
@@ -264,7 +268,8 @@ Respond ONLY JSON:
 """
     try:
         resp_text = await asyncio.wait_for(
-            llm_model(prompt=user_prompt, system_prompt=system_prompt, temperature=0.1),
+            llm_model(prompt=user_prompt,
+                      system_prompt=system_prompt, temperature=0.1),
             timeout=timeout,
         )
     except asyncio.TimeoutError:
@@ -283,11 +288,13 @@ Respond ONLY JSON:
     text = resp_text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
-        text = "\n".join(lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
+        text = "\n".join(
+            lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
-        payload = {"classification": "not_related", "reason": "Could not parse LLM response"}
+        payload = {"classification": "not_related",
+                   "reason": "Could not parse LLM response"}
     return {
         "candidate": candidate,
         "classification": payload.get("classification", "not_related"),
@@ -303,13 +310,15 @@ async def semantic_coverage(
     top_k: int = 12,
 ) -> Dict[str, Any]:
     # Cache key
-    code_key = code_index_id if isinstance(code_index_id, str) else "_".join(code_index_id)
+    code_key = code_index_id if isinstance(
+        code_index_id, str) else "_".join(code_index_id)
     cache_key = f"{requirement.id}::{code_key}::top{top_k}"
     cached = _SEMANTIC_CACHE.get(cache_key)
     if cached:
         return cached
 
-    candidates = semantic_retrieve_candidates(requirement, code_index_id, provider, top_k=top_k)
+    candidates = semantic_retrieve_candidates(
+        requirement, code_index_id, provider, top_k=top_k)
     if not candidates:
         result = {
             "requirement_id": requirement.id,
@@ -329,19 +338,25 @@ async def semantic_coverage(
         try:
             judgement = await llm_semantic_judgement(requirement, cand, llm_model)
             judgements.append(judgement)
-            
+
             # Early exit: if we found a clear "implemented" match, stop evaluating
             if judgement.get("classification") == "implemented":
-                logger.info(f"[Semantic] Found implemented match for requirement {requirement.id} at candidate {idx+1}/{len(candidates)}")
+                logger.info(
+                    f"[Semantic] Found implemented match for requirement {requirement.id} at candidate {idx + 1}/{len(candidates)}"
+                )
                 break
         except Exception as e:
             # Log but continue with next candidate
-            logger.warning(f"[Semantic] Error evaluating candidate {idx+1} for requirement {requirement.id}: {e}")
-            judgements.append({
-                "candidate": cand,
-                "classification": "not_related",
-                "reason": f"Evaluation error: {str(e)[:50]}",
-            })
+            logger.warning(
+                f"[Semantic] Error evaluating candidate {idx + 1} for requirement {requirement.id}: {e}"
+            )
+            judgements.append(
+                {
+                    "candidate": cand,
+                    "classification": "not_related",
+                    "reason": f"Evaluation error: {str(e)[:50]}",
+                }
+            )
 
     status = "not_implemented"
     best_match = None
@@ -396,7 +411,8 @@ def build_symbol_index(code_index_id: str | Sequence[str]) -> Dict[str, list]:
                         if current_class:
                             symbol = f"{current_class}.{fn}"
                             index.setdefault(symbol, []).append(
-                                {"chunk_id": chunk.chunk_id, "doc_id": chunk.doc_id}
+                                {"chunk_id": chunk.chunk_id,
+                                    "doc_id": chunk.doc_id}
                             )
                         symbol = fn
                         index.setdefault(symbol, []).append(
@@ -407,7 +423,8 @@ def build_symbol_index(code_index_id: str | Sequence[str]) -> Dict[str, list]:
 
 async def evaluate_requirement(
     requirement: GddRequirement,
-    code_index_id: str | Sequence[str],  # Support single or multiple code indices
+    # Support single or multiple code indices
+    code_index_id: str | Sequence[str],
     *,
     provider: Optional[QwenProvider] = None,
     llm_func=None,
@@ -436,7 +453,8 @@ async def evaluate_requirement(
 
 async def evaluate_all_requirements(
     doc_id: str,
-    code_index_id: str | Sequence[str],  # Support single or multiple code indices
+    # Support single or multiple code indices
+    code_index_id: str | Sequence[str],
     requirements: Sequence[GddRequirement],
     *,
     output_dir: Optional[Path] = None,
@@ -453,7 +471,8 @@ async def evaluate_all_requirements(
     if isinstance(code_index_id, str):
         code_id_str = code_index_id
     else:
-        code_id_str = "_".join(code_index_id[:3])  # Use first 3 indices for filename
+        # Use first 3 indices for filename
+        code_id_str = "_".join(code_index_id[:3])
     report_path = out_dir / f"{doc_id}_{code_id_str}_coverage.json"
 
     active_provider = provider or QwenProvider()
@@ -465,7 +484,9 @@ async def evaluate_all_requirements(
     total = len(requirements)
     for idx, requirement in enumerate(requirements, 1):
         try:
-            logger.info(f"[Coverage] Evaluating requirement {idx}/{total}: {requirement.id} - {requirement.title[:50]}")
+            logger.info(
+                f"[Coverage] Evaluating requirement {idx}/{total}: {requirement.id} - {requirement.title[:50]}"
+            )
             result = await evaluate_requirement(
                 requirement,
                 code_index_id,
@@ -476,23 +497,28 @@ async def evaluate_all_requirements(
             )
             results.append(result)
             status = result.get("status", "unknown")
-            logger.info(f"[Coverage] Requirement {idx}/{total} completed: {status}")
+            logger.info(
+                f"[Coverage] Requirement {idx}/{total} completed: {status}")
         except Exception as e:
-            logger.error(f"[Coverage] Error evaluating requirement {idx}/{total} ({requirement.id}): {e}", exc_info=True)
+            logger.error(
+                f"[Coverage] Error evaluating requirement {idx}/{total} ({requirement.id}): {e}",
+                exc_info=True,
+            )
             # Add error result so evaluation can continue
-            results.append({
-                "requirement_id": requirement.id,
-                "status": "error",
-                "coverage_type": "error",
-                "reason": f"Evaluation error: {str(e)[:100]}",
-            })
+            results.append(
+                {
+                    "requirement_id": requirement.id,
+                    "status": "error",
+                    "coverage_type": "error",
+                    "reason": f"Evaluation error: {str(e)[:100]}",
+                }
+            )
 
     report_payload = {
         "doc_id": doc_id,
         "code_index_id": code_index_id,
         "results": results,
     }
-    report_path.write_text(json.dumps(report_payload, indent=2, ensure_ascii=False))
+    report_path.write_text(json.dumps(
+        report_payload, indent=2, ensure_ascii=False))
     return report_path
-
-

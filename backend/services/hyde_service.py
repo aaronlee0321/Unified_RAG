@@ -2,20 +2,21 @@
 HYDE (Hypothetical Document Embeddings) query expansion for keyword extractor.
 Adapted from unified_rag_app's gdd_hyde.py
 """
+
 import os
 import time
-from typing import Tuple, Dict, Optional
+from typing import Dict, Tuple
 
 try:
     from openai import OpenAI
+
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
     OpenAI = None
 
 # Get API key and base URL
-api_key = os.getenv('OPENAI_API_KEY') or os.getenv(
-    'QWEN_API_KEY') or os.getenv('DASHSCOPE_API_KEY')
+api_key = os.getenv("OPENAI_API_KEY") or os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
 if api_key and OPENAI_AVAILABLE:
     base_url = None
     client = OpenAI(api_key=api_key, base_url=base_url)
@@ -23,10 +24,10 @@ else:
     client = None
 
 # HYDE model
-_hyde_model = os.getenv('HYDE_MODEL', 'gpt-4o-mini')
+_hyde_model = os.getenv("HYDE_MODEL", "gpt-4o-mini")
 
 # HYDE System Prompt (adapted for general document search)
-HYDE_SYSTEM_PROMPT = '''You are a document search query rewriter for a RAG system.
+HYDE_SYSTEM_PROMPT = """You are a document search query rewriter for a RAG system.
 
 Your ONLY job is to transform a natural language query into a better search query over documents.
 
@@ -44,9 +45,9 @@ Instructions:
 4. Do NOT suggest improvements or hypothetical content.
 5. Do NOT generate code; generate a plain-text search query focused on document content.
 
-Output format: 
+Output format:
 - Provide only the rewritten search query.
-- Do not include explanations, comments, or code blocks.'''
+- Do not include explanations, comments, or code blocks."""
 
 
 def hyde_expand_query(query: str) -> Tuple[str, Dict]:
@@ -68,17 +69,11 @@ def hyde_expand_query(query: str) -> Tuple[str, Dict]:
         stream = client.chat.completions.create(
             model=_hyde_model,
             messages=[
-                {
-                    "role": "system",
-                    "content": HYDE_SYSTEM_PROMPT
-                },
-                {
-                    "role": "user",
-                    "content": f"Rewrite this query for searching documents: {query}"
-                }
+                {"role": "system", "content": HYDE_SYSTEM_PROMPT},
+                {"role": "user", "content": f"Rewrite this query for searching documents: {query}"},
             ],
             stream=True,
-            temperature=0.3
+            temperature=0.3,
         )
 
         first_token_time = None
@@ -98,7 +93,7 @@ def hyde_expand_query(query: str) -> Tuple[str, Dict]:
             "total_time": round(total_time, 2),
             "ttft": round(first_token_time, 2) if first_token_time else None,
             "token_count": token_count,
-            "response_length": len(full_response)
+            "response_length": len(full_response),
         }
 
         return full_response.strip(), timing_data
